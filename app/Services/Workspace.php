@@ -18,7 +18,7 @@ class Workspace
 {
     public function state(): array
     {
-        return ['deleted_draft_ids' => Draft::onlyTrashed()->pluck('id'), 'drafts' => Draft::orderByDesc('updated_at')->get(), 'accounts' => Account::orderBy('name')->get(),
+        return ['deleted_draft_ids' => Draft::onlyTrashed()->pluck('id'), 'drafts' => Draft::orderByDesc('updated_at')->get(), 'accounts' => Account::orderBy('name')->get()->map(fn (Account $account): array => $account->toArray() + ['avatar_url' => app(SocialProviders::class)->avatarUrl($account)]),
             'media' => Media::latest()->get(), 'publications' => Publication::orderByDesc('scheduled_at')->get(),
             'settings' => ['workspace_id' => app(WorkspaceOwner::class)->workspaceId(), 'workspaces' => \App\Models\Workspace::where('user_id', app(WorkspaceOwner::class)->requireId())->orderBy('created_at')->get(), 'mode' => config('sendae.mode'), 'mcp_url' => url('/mcp'), 'connections_url' => url('/'), 'paired' => false, 'providers' => collect(config('sendae.providers'))->map(fn ($p) => ['label' => $p['label'], 'configured' => (bool) $p['client_id'], 'approved' => $p['approved'] ?? true])]];
     }

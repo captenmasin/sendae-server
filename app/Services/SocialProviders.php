@@ -7,12 +7,34 @@ use App\Models\Media;
 use App\Models\Publication;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 
 class SocialProviders
 {
+    public function avatarUrl(Account $account): ?string
+    {
+        if ($account->status !== 'connected' || ! in_array($account->provider, ['threads', 'facebook'])) {
+            return null;
+        }
+
+        return Cache::remember('account-avatar:'.$account->id.':'.$account->updated_at?->getTimestamp(), now()->addHour(), function () use ($account): array {
+            try {
+                $client = $this->client($account)->connectTimeout(2)->timeout(3)->withoutRedirecting();
+                $response = $account->provider === 'threads'
+                    ? $client->get('https://graph.threads.net/v1.0/me', ['fields' => 'threads_profile_picture_url'])
+                    : $client->get('https://graph.facebook.com/'.config('sendae.meta_version').'/me', ['fields' => 'picture.width(96).height(96)']);
+                $url = $response->successful() ? $response->json($account->provider === 'threads' ? 'threads_profile_picture_url' : 'picture.data.url') : null;
+
+                return ['url' => is_string($url) && filter_var($url, FILTER_VALIDATE_URL) && parse_url($url, PHP_URL_SCHEME) === 'https' && ! parse_url($url, PHP_URL_USER) ? $url : null];
+            } catch (ConnectionException|ProviderFailure) {
+                return ['url' => null];
+            }
+        })['url'];
+    }
+
     public function client(Account $a)
     {
         $credentials = $a->credentials;
