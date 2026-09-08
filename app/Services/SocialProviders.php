@@ -14,6 +14,25 @@ use Illuminate\Support\Facades\URL;
 
 class SocialProviders
 {
+    public function postUrl(Account $account, string $id): ?string
+    {
+        if ($account->provider !== 'threads') {
+            return null;
+        }
+
+        return Cache::remember('post-url:'.$account->id.':'.$id, now()->addHour(), function () use ($account, $id): array {
+            try {
+                $response = $this->client($account)->connectTimeout(2)->timeout(3)->withoutRedirecting()
+                    ->get('https://graph.threads.net/v1.0/'.rawurlencode($id), ['fields' => 'permalink']);
+                $url = $response->successful() ? $response->json('permalink') : null;
+
+                return ['url' => is_string($url) && filter_var($url, FILTER_VALIDATE_URL) && parse_url($url, PHP_URL_SCHEME) === 'https' && in_array(parse_url($url, PHP_URL_HOST), ['threads.net', 'www.threads.net', 'threads.com', 'www.threads.com'], true) && ! parse_url($url, PHP_URL_USER) ? $url : null];
+            } catch (ConnectionException|ProviderFailure) {
+                return ['url' => null];
+            }
+        })['url'];
+    }
+
     public function avatarUrl(Account $account): ?string
     {
         if ($account->status !== 'connected' || ! in_array($account->provider, ['threads', 'facebook'])) {
