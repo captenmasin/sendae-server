@@ -74,6 +74,19 @@ class ConnectionTest extends TestCase
         $this->assertSame(0, Account::withoutGlobalScopes()->count());
     }
 
+    public function test_facebook_connection_requests_access_to_business_owned_pages(): void
+    {
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        $url = $this->postJson('/api/connect', ['provider' => 'facebook'])->assertOk()->json('url');
+        $this->app['auth']->forgetGuards();
+
+        $response = $this->get(parse_url($url, PHP_URL_PATH))->assertRedirect();
+
+        parse_str(parse_url($response->headers->get('Location'), PHP_URL_QUERY), $parameters);
+        $this->assertSame('www.facebook.com', parse_url($response->headers->get('Location'), PHP_URL_HOST));
+        $this->assertEqualsCanonicalizing(['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'read_insights', 'business_management'], explode(',', $parameters['scope']));
+    }
+
     public function test_expired_connection_ticket_returns_403(): void
     {
         $this->get('/connections/'.str_repeat('a', 64))->assertForbidden();

@@ -55,7 +55,7 @@ class ConnectionController extends Controller
         [$url,$scope] = match ($provider) {
             'x' => ['https://x.com/i/oauth2/authorize', 'tweet.read tweet.write users.read offline.access media.write'],
             'threads' => ['https://threads.net/oauth/authorize', 'threads_basic,threads_content_publish,threads_manage_insights'],
-            'facebook' => ['https://www.facebook.com/'.config('sendae.meta_version').'/dialog/oauth', 'pages_show_list,pages_read_engagement,pages_manage_posts,read_insights'],
+            'facebook' => ['https://www.facebook.com/'.config('sendae.meta_version').'/dialog/oauth', 'pages_show_list,pages_read_engagement,pages_manage_posts,read_insights,business_management'],
             'linkedin' => ['https://www.linkedin.com/oauth/v2/authorization', 'openid profile w_member_social'],
             'linkedin_page' => ['https://www.linkedin.com/oauth/v2/authorization', 'openid profile w_organization_social rw_organization_admin r_organization_social'],
         };
