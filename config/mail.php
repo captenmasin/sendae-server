@@ -37,6 +37,11 @@ return [
 
     'mailers' => [
 
+        'cloudflare' => [
+            'transport' => 'cloudflare',
+            'client' => ['timeout' => 10, 'max_duration' => 15],
+        ],
+
         'smtp' => [
             'transport' => 'smtp',
             'scheme' => env('MAIL_SCHEME'),
