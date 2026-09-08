@@ -24,7 +24,7 @@ class DraftDeletionTest extends TestCase
         $account = Account::create(['name' => 'Account', 'provider' => 'x', 'provider_id' => '123']);
         $payload = ['id' => (string) Str::uuid(), 'title' => 'Draft to delete', 'version' => 0, 'content' => ['items' => [['text' => 'Scheduled content', 'media_ids' => []]], 'overrides' => [], 'account_ids' => [$account->id]]];
         $this->postJson('/api/drafts', $payload)->assertOk();
-        $publication = $this->postJson('/api/schedule', ['draft_id' => $payload['id'], 'version' => 1, 'mode' => 'now'])->assertOk()->json('0');
+        $publication = $this->postJson('/api/schedule', ['draft_id' => $payload['id'], 'version' => 1, 'mode' => 'exact', 'scheduled_at' => now()->addDay()->toIso8601String()])->assertOk()->json('0');
         $this->postJson('/api/deleteDraft', ['id' => $payload['id'], 'version' => 0])->assertConflict();
         $this->assertNotSoftDeleted('drafts', ['id' => $payload['id']]);
 

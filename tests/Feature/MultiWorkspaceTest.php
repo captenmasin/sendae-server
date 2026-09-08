@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\PublishAccount;
 use App\Models\Account;
 use App\Models\Draft;
 use App\Models\User;
@@ -11,6 +12,7 @@ use App\Services\WorkspaceOwner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Laravel\Passport\Passport;
 use Tests\TestCase;
@@ -31,7 +33,7 @@ class MultiWorkspaceTest extends TestCase
         $account = Account::create(['name' => 'Sitepulse X', 'provider' => 'x', 'provider_id' => '123']);
         $payload = ['id' => (string) Str::uuid(), 'title' => 'Private Sitepulse draft', 'version' => 0, 'content' => ['items' => [['text' => 'Sitepulse update', 'media_ids' => []]], 'overrides' => [], 'account_ids' => [$account->id]]];
         $this->postJson('/api/drafts', $payload)->assertOk();
-        $publication = $this->postJson('/api/schedule', ['draft_id' => $payload['id'], 'version' => 1, 'mode' => 'now'])->assertOk()->json('0.id');
+        $publication = $this->postJson('/api/schedule', ['draft_id' => $payload['id'], 'version' => 1, 'mode' => 'exact', 'scheduled_at' => now()->addDay()->toIso8601String()])->assertOk()->json('0.id');
 
         $this->withHeader('X-Workspace-Id', $second)->getJson('/api/state')->assertJsonCount(0, 'drafts')->assertJsonCount(0, 'accounts')->assertJsonCount(0, 'publications');
         $this->postJson('/api/drafts', $payload)->assertNotFound();
@@ -55,6 +57,7 @@ class MultiWorkspaceTest extends TestCase
         $this->actingAs($user);
         $second = Workspace::create(['user_id' => $user->id, 'name' => 'Novogamer', 'icon' => '★']);
         $context = app(WorkspaceOwner::class);
+        Queue::fake([PublishAccount::class]);
         $account = $context->run($user->id, function () {
             $account = Account::create(['name' => 'Novogamer X', 'provider' => 'x', 'provider_id' => '123', 'credentials' => ['access_token' => 'novogamer-token']]);
             $draft = Draft::create(['content' => ['items' => [['text' => 'Novogamer update', 'media_ids' => []]], 'overrides' => [], 'account_ids' => [$account->id]]]);
@@ -69,6 +72,7 @@ class MultiWorkspaceTest extends TestCase
         $this->assertSame($user->workspace_id, $context->workspaceId());
         $this->assertDatabaseHas('publications', ['workspace_id' => $second->id, 'status' => 'published']);
         Http::assertSent(fn ($request) => $request->hasHeader('Authorization', 'Bearer novogamer-token') && $request['text'] === 'Novogamer update');
+        Queue::assertPushed(PublishAccount::class, fn (PublishAccount $job): bool => $job->accountId === $account->id);
     }
 
     public function test_social_connection_selection_keeps_the_original_workspace(): void

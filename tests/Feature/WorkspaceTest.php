@@ -52,7 +52,10 @@ class WorkspaceTest extends TestCase
     {
         $d = $this->draft($a, $items);
 
-        return app(Workspace::class)->schedule(['draft_id' => $d->id, 'version' => 1, 'mode' => 'now'])[0];
+        $publication = app(Workspace::class)->schedule(['draft_id' => $d->id, 'version' => 1, 'mode' => 'exact', 'scheduled_at' => now()->addMinute()->toIso8601String()])[0];
+        $publication->update(['scheduled_at' => now()]);
+
+        return $publication;
     }
 
     public function test_credentials_are_encrypted_and_never_returned_in_state(): void

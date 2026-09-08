@@ -37,7 +37,7 @@ class WorkspaceIsolationTest extends TestCase
         $original = Storage::disk('local')->get($media->path);
         $payload = ['id' => (string) Str::uuid(), 'title' => 'Private draft', 'version' => 0, 'content' => ['items' => [['text' => 'Private words', 'media_ids' => []]], 'overrides' => [], 'account_ids' => [$account->id]]];
         $draft = $this->postJson('/api/drafts', $payload)->assertOk()->json('draft');
-        $publication = $this->postJson('/api/schedule', ['draft_id' => $draft['id'], 'version' => 1, 'mode' => 'now'])->assertOk()->json('0');
+        $publication = $this->postJson('/api/schedule', ['draft_id' => $draft['id'], 'version' => 1, 'mode' => 'exact', 'scheduled_at' => now()->addDay()->toIso8601String()])->assertOk()->json('0');
         Passport::actingAs($b, ['mcp:use']);
         $this->getJson('/api/state')->assertOk()->assertJsonCount(0, 'drafts')->assertJsonCount(0, 'accounts')->assertJsonCount(0, 'media')->assertJsonCount(0, 'publications');
         $this->postJson('/api/drafts', $payload)->assertNotFound();
