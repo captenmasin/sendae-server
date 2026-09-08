@@ -10,3 +10,6 @@ This is the independent server for a public multi-user Sendae release. Every cus
 
 ## API-only server; all screens belong to Sendae
 Sendae-server serves no HTML screens or hosted /local workspace routes. Sendae owns login, password reset, social-account selection and MCP consent. Email and OAuth handoffs use sendae:// links. Keep token validation, provider credentials, account/workspace isolation and publication execution on the server.
+
+## Email verification is not required
+This supersedes the earlier verify-before-access rule. Accounts can sign in immediately after registration; do not send verification emails or gate API, OAuth or MCP access on email_verified_at. Authentication, token scopes and workspace isolation remain mandatory.

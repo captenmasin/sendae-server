@@ -12,13 +12,13 @@ class SessionTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_sign_in_issues_scoped_token_and_sign_out_revokes_it(): void
+    public function test_unverified_account_can_sign_in_access_workspace_and_revoke_its_token(): void
     {
         $key = openssl_pkey_new(['private_key_bits' => 2048]);
         openssl_pkey_export($key, $private);
         config(['passport.private_key' => $private, 'passport.public_key' => openssl_pkey_get_details($key)['key']]);
         app(ClientRepository::class)->createPersonalAccessGrantClient('Test desktop', 'users');
-        $user = User::factory()->create();
+        $user = User::factory()->unverified()->create();
         $response = $this->postJson('/api/session', ['email' => $user->email, 'password' => 'password'])->assertOk()->assertHeader('Cache-Control', 'no-store, private')->assertJsonPath('email', $user->email);
         $this->assertSame($user->workspace_id, $response->json('workspace_id'));
         $token = $response->json('token');
@@ -47,7 +47,7 @@ class SessionTest extends TestCase
         $this->assertDatabaseCount('oauth_access_tokens', 0);
     }
 
-    public function test_each_verified_customer_has_their_own_workspace(): void
+    public function test_each_customer_has_their_own_workspace(): void
     {
         $first = User::factory()->create();
         $other = User::factory()->create();

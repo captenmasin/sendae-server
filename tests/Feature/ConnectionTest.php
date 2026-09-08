@@ -44,9 +44,9 @@ class ConnectionTest extends TestCase
         $this->postJson('/api/connect', ['provider' => 'linkedin_page'])->assertStatus(422)->assertJsonPath('message', 'LinkedIn Company Page access is awaiting approval.');
     }
 
-    public function test_desktop_ticket_starts_oauth_for_the_original_workspace(): void
+    public function test_unverified_account_can_start_oauth_for_the_original_workspace(): void
     {
-        $user = User::factory()->create();
+        $user = User::factory()->unverified()->create();
         Passport::actingAs($user, ['mcp:use']);
         $second = Workspace::create(['user_id' => $user->id, 'name' => 'Novogamer', 'icon' => '★']);
 

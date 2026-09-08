@@ -15,7 +15,6 @@ class SessionController extends Controller
         $data['email'] = Str::lower(trim($data['email']));
         abort_unless(Auth::guard('web')->once(collect($data)->only(['email', 'password'])->all()), 401, 'The sign-in details did not match.');
         $user = Auth::guard('web')->user();
-        abort_unless($user->hasVerifiedEmail(), 403, 'Verify your email before signing in.');
         $workspace = $user->workspace_id;
         abort_if(! empty($data['workspace_id']) && ! hash_equals($workspace, $data['workspace_id']), 409, 'This Mac belongs to another Sendae workspace. Its drafts have been kept safe.');
 

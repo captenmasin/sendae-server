@@ -4,10 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use Illuminate\Auth\Events\PasswordReset;
-use Illuminate\Auth\Events\Verified;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
@@ -18,7 +16,7 @@ class RegistrationController extends Controller
 {
     private function passwordRules(): array
     {
-        return ['required', 'string', 'min:12', 'confirmed', function ($attribute, $value, $fail) {
+        return ['required', 'string', 'min:8', 'confirmed', function ($attribute, $value, $fail) {
             if (strlen($value) > 72) {
                 $fail('Use a password of at most 72 bytes.');
             }
@@ -32,44 +30,17 @@ class RegistrationController extends Controller
 
     public function store(Request $request)
     {
-        $this->requireMail();
         $request->validate(['email' => 'required|string']);
         $request->merge(['email' => Str::lower(trim($request->input('email', '')))]);
         $data = $request->validate(['name' => 'required|string|max:100', 'email' => ['required', 'email', 'max:255', Rule::unique('users')], 'password' => $this->passwordRules()]);
         try {
-            $user = User::create($data);
+            User::create($data);
         } catch (UniqueConstraintViolationException $e) {
             throw ValidationException::withMessages(['email' => 'That email already has an account. Sign in or reset your password.']);
         }
-        $user->sendEmailVerificationNotification();
-        $message = 'Account created. Check your email to verify it, then sign in to Sendae.';
+        $message = 'Account created. Sign in to Sendae to continue.';
 
         return response()->json(['message' => $message], 201);
-    }
-
-    public function verify(Request $request, string $id, string $hash)
-    {
-        $user = User::findOrFail($id);
-        abort_unless(hash_equals(sha1($user->getEmailForVerification()), $hash), 403);
-        if (! $user->hasVerifiedEmail() && $user->markEmailAsVerified()) {
-            event(new Verified($user));
-        }
-
-        return response('', 302, ['Location' => 'sendae://verified', 'Cache-Control' => 'no-store']);
-    }
-
-    public function resend(Request $request)
-    {
-        $this->requireMail();
-        $data = $request->validate(['email' => 'required|email|max:255', 'password' => 'required|string|max:1000']);
-        if (Auth::guard('web')->once($data)) {
-            $user = Auth::guard('web')->user();
-            if (! $user->hasVerifiedEmail()) {
-                $user->sendEmailVerificationNotification();
-            }
-        }
-
-        return response()->json(['message' => 'If those details match an unverified account, a new verification email is on its way.']);
     }
 
     public function forgot(Request $request)

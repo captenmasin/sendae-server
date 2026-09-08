@@ -40,7 +40,7 @@ class AuthorizationTest extends TestCase
         $client = $this->client();
         $ticket = $this->ticket($client);
         $this->getJson('/api/authorizations/'.$ticket)->assertUnauthorized();
-        $user = User::factory()->create();
+        $user = User::factory()->unverified()->create();
         Passport::actingAs($user, ['mcp:use']);
         $this->postJson('/api/authorizations/'.$ticket, ['approved' => true])->assertForbidden();
         $this->getJson('/api/authorizations/'.$ticket)->assertOk()->assertJsonPath('client', 'Test MCP client')->assertJsonPath('scopes', ['mcp:use']);
@@ -80,13 +80,11 @@ class AuthorizationTest extends TestCase
         $this->assertDatabaseCount('oauth_auth_codes', 0);
     }
 
-    public function test_invalid_expired_and_unverified_authorizations_fail(): void
+    public function test_invalid_and_expired_authorizations_fail(): void
     {
         $client = $this->client();
         $this->get('/oauth/authorize?'.http_build_query(['client_id' => $client->id, 'response_type' => 'code', 'redirect_uri' => 'https://evil.example/callback']))->assertUnauthorized();
         $ticket = $this->ticket($client);
-        Passport::actingAs(User::factory()->unverified()->create(), ['mcp:use']);
-        $this->getJson('/api/authorizations/'.$ticket)->assertForbidden();
         Passport::actingAs(User::factory()->create(), ['mcp:use']);
         $this->travel(11)->minutes();
         $this->getJson('/api/authorizations/'.$ticket)->assertNotFound();

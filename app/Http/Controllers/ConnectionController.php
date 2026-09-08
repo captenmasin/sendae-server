@@ -36,7 +36,6 @@ class ConnectionController extends Controller
         $current = $r->user('web') ?? $r->user();
         abort_if($current && $current->id !== $payload['user_id'], 403, 'This connection link belongs to another account.');
         $user = User::findOrFail($payload['user_id']);
-        abort_unless($user->hasVerifiedEmail(), 403);
         Auth::shouldUse('web');
         Auth::guard('web')->login($user);
         $r->session()->regenerate();

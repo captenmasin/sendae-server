@@ -13,8 +13,6 @@ class LocalOrOwner
             return response()->json(['message' => 'Sign in to continue.'], 401);
         }
 
-        abort_unless($request->user()->hasVerifiedEmail(), 403, 'Verify your email before opening your workspace.');
-
         return $next($request);
     }
 }

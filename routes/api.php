@@ -11,7 +11,6 @@ use Illuminate\Support\Facades\Route;
 use Laravel\Passport\Http\Middleware\CheckToken;
 
 Route::post('/register', [RegistrationController::class, 'store'])->middleware('throttle:signup');
-Route::post('/verification', [RegistrationController::class, 'resend'])->middleware('throttle:verification');
 Route::post('/forgot-password', [RegistrationController::class, 'forgot'])->middleware('throttle:recovery');
 
 Route::post('/reset-password', [RegistrationController::class, 'reset'])->middleware('throttle:password-reset');

@@ -2,7 +2,6 @@
 
 use App\Http\Controllers\AuthorizationController;
 use App\Http\Controllers\ConnectionController;
-use App\Http\Controllers\RegistrationController;
 use App\Http\Controllers\WorkspaceController;
 use App\Http\Middleware\LocalOrOwner;
 use Illuminate\Http\Request;
@@ -11,7 +10,6 @@ use Laravel\Passport\Http\Controllers\AccessTokenController;
 
 Route::get('/up', fn () => response()->json(['status' => 'ok']));
 Route::get('/', fn () => response()->json(['service' => 'Sendae API']));
-Route::get('/verify-email/{id}/{hash}', [RegistrationController::class, 'verify'])->middleware(['signed', 'throttle:6,1'])->name('verification.verify');
 Route::get('/reset-password/{token}', function (Request $request, string $token) {
     $data = $request->validate(['email' => 'required|email|max:255']);
 
