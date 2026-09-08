@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\PublishAccount;
 use App\Mcp\Servers\SendaeServer;
 use App\Mcp\Tools\SaveDraft;
 use App\Mcp\Tools\WorkspaceTool;
@@ -17,6 +18,7 @@ use App\Services\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -83,12 +85,26 @@ class WorkspaceTest extends TestCase
     {
         $a = $this->account();
         $d = $this->draft($a);
+        Queue::fake([PublishAccount::class]);
         $input = ['draft_id' => $d->id, 'version' => 1, 'mode' => 'now'];
         $p = app(Workspace::class)->schedule($input)[0];
         app(Workspace::class)->schedule($input);
         $this->assertDatabaseCount('publications', 1);
         $d->update(['content' => ['items' => [['text' => 'Changed', 'media_ids' => []]], 'overrides' => [], 'account_ids' => [$a->id]]]);
         $this->assertSame('Hello world', $p->fresh()->snapshot['items'][0]['text']);
+        Queue::assertPushed(PublishAccount::class, fn (PublishAccount $job): bool => $job->accountId === $a->id);
+        Queue::assertPushed(PublishAccount::class, 1);
+    }
+
+    public function test_future_publications_wait_for_the_scheduler(): void
+    {
+        $draft = $this->draft($this->account());
+        Queue::fake([PublishAccount::class]);
+
+        $publication = app(Workspace::class)->schedule(['draft_id' => $draft->id, 'version' => 1, 'mode' => 'exact', 'scheduled_at' => now()->addDay()->toIso8601String()])[0];
+
+        $this->assertSame('scheduled', $publication->fresh()->status);
+        Queue::assertNothingPushed();
     }
 
     public function test_schedule_is_atomic_when_one_network_is_invalid(): void
@@ -99,12 +115,14 @@ class WorkspaceTest extends TestCase
         $content = $d->content;
         $content['account_ids'] = [$fb->id, $x->id];
         $d->update(['content' => $content]);
+        Queue::fake([PublishAccount::class]);
         try {
             app(Workspace::class)->schedule(['draft_id' => $d->id, 'version' => 1, 'mode' => 'now']);
             $this->fail('Expected validation failure');
         } catch (ValidationException $e) {
         }
         $this->assertDatabaseCount('publications', 0);
+        Queue::assertNothingPushed();
     }
 
     public function test_threads_combine_without_silently_discarding_media_or_text(): void

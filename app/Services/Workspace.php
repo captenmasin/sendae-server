@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\PublishAccount;
 use App\Models\Account;
 use App\Models\Draft;
 use App\Models\Media;
@@ -161,6 +162,11 @@ class Workspace
                     $this->invalid('scheduled_at', 'Choose a future time.');
                 }
                 $result[] = Publication::create(['draft_id' => $draft->id, 'account_id' => $account->id, 'snapshot' => ['title' => $draft->title, 'items' => $items], 'scheduled_at' => $at, 'receipts' => []]);
+            }
+            if ($data['mode'] === 'now') {
+                foreach ($accounts as $account) {
+                    PublishAccount::dispatch($account->id)->afterCommit();
+                }
             }
 
             return $result;
