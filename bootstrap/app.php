@@ -17,9 +17,9 @@ return Application::configure(basePath: dirname(__DIR__))
         web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
-        health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->redirectGuestsTo(fn (): ?string => null);
         $middleware->prependToPriorityList(SubstituteBindings::class, LocalOrOwner::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
@@ -41,6 +41,6 @@ return Application::configure(basePath: dirname(__DIR__))
             return response()->json(['message' => 'The server could not be reached. Your local drafts are safe.'], 503);
         });
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
+            fn (Request $request): bool => true,
         );
     })->create();

@@ -65,8 +65,9 @@ class WorkspaceTest extends TestCase
     {
         $this->app['auth']->forgetGuards();
         $this->getJson('/api/state')->assertUnauthorized();
-        $this->getJson('/local/state')->assertUnauthorized();
-        $this->actingAs(User::factory()->create())->getJson('/local/state')->assertOk();
+        $this->actingAs(User::factory()->create())->get('/api/state')->assertUnauthorized();
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        $this->getJson('/api/state')->assertOk();
     }
 
     public function test_upload_is_durable_and_rejects_executable_media(): void

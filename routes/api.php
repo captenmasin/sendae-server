@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AuthorizationController;
 use App\Http\Controllers\ConnectionController;
 use App\Http\Controllers\RegistrationController;
 use App\Http\Controllers\SessionController;
@@ -13,9 +14,15 @@ Route::post('/register', [RegistrationController::class, 'store'])->middleware('
 Route::post('/verification', [RegistrationController::class, 'resend'])->middleware('throttle:verification');
 Route::post('/forgot-password', [RegistrationController::class, 'forgot'])->middleware('throttle:recovery');
 
+Route::post('/reset-password', [RegistrationController::class, 'reset'])->middleware('throttle:password-reset');
+
 Route::post('/session', [SessionController::class, 'store'])->middleware('throttle:signin');
 
 Route::middleware(['auth:api', LocalOrOwner::class, CheckToken::using('mcp:use'), 'throttle:120,1'])->group(function () {
+    Route::get('/authorizations/{ticket}', [AuthorizationController::class, 'show'])->where('ticket', '[A-Za-z0-9]{64}');
+    Route::post('/authorizations/{ticket}', [AuthorizationController::class, 'decide'])->where('ticket', '[A-Za-z0-9]{64}');
+    Route::get('/connections/{ticket}', [ConnectionController::class, 'choices'])->where('ticket', '[A-Za-z0-9]{64}');
+    Route::post('/connections/{ticket}', [ConnectionController::class, 'select'])->where('ticket', '[A-Za-z0-9]{64}');
     Route::get('/workspaces', [WorkspacesController::class, 'index']);
     Route::post('/workspaces', [WorkspacesController::class, 'store']);
     Route::patch('/workspaces/{workspace}', [WorkspacesController::class, 'update']);

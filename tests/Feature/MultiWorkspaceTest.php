@@ -9,6 +9,7 @@ use App\Models\Workspace;
 use App\Services\Publisher;
 use App\Services\WorkspaceOwner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Laravel\Passport\Passport;
@@ -77,7 +78,10 @@ class MultiWorkspaceTest extends TestCase
         $second = Workspace::create(['user_id' => $user->id, 'name' => 'Novogamer', 'icon' => '★']);
         Account::create(['name' => 'Sitepulse', 'provider' => 'x', 'provider_id' => '123']);
         $selection = ['workspace_id' => $second->id, 'user_id' => $user->id, 'provider' => 'x', 'accounts' => [['provider_id' => '123', 'name' => 'Novogamer', 'credentials' => ['access_token' => 'token']]], 'expires' => time() + 600];
-        $this->withSession(['social_choices' => $selection])->post('/connections/select', ['accounts' => [0], 'timezone' => 'Europe/London'])->assertRedirect();
+        Passport::actingAs($user, ['mcp:use']);
+        $ticket = str_repeat('a', 64);
+        Cache::put('social_choices:'.$ticket, $selection, now()->addMinutes(10));
+        $this->postJson('/api/connections/'.$ticket, ['accounts' => [0], 'timezone' => 'Europe/London'])->assertOk();
         $this->assertDatabaseHas('accounts', ['workspace_id' => $second->id, 'name' => 'Novogamer']);
         $this->assertDatabaseHas('accounts', ['workspace_id' => $user->workspace_id, 'name' => 'Sitepulse']);
     }

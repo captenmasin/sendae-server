@@ -41,7 +41,7 @@ class RegistrationTest extends TestCase
 
             return true;
         });
-        $this->get($url)->assertRedirect('/login');
+        $this->get($url)->assertRedirect('sendae://verified')->assertContent('');
         $this->assertTrue($user->fresh()->hasVerifiedEmail());
         $this->postJson('/api/session', $input)->assertOk()->assertJsonPath('workspace_id', $user->workspace_id);
         $this->postJson('/api/register', $input)->assertUnprocessable()->assertJsonValidationErrors('email');
@@ -76,10 +76,11 @@ class RegistrationTest extends TestCase
             return true;
         });
         $data = ['email' => $user->email, 'token' => $token, 'password' => 'a-new-long-password', 'password_confirmation' => 'a-new-long-password'];
-        $this->post('/reset-password', $data)->assertRedirect('/login');
+        $this->get(route('password.reset', ['token' => $token, 'email' => $user->email]))->assertRedirect('sendae://reset-password?'.http_build_query(['token' => $token, 'email' => $user->email]))->assertContent('');
+        $this->postJson('/api/reset-password', $data)->assertOk()->assertJsonPath('message', 'Password updated. Sign in with your new password.');
         $this->assertTrue(Hash::check($data['password'], $user->fresh()->password));
         $this->assertDatabaseHas('oauth_access_tokens', ['user_id' => $user->id, 'revoked' => true]);
-        $this->post('/reset-password', $data)->assertSessionHasErrors('email');
+        $this->postJson('/api/reset-password', $data)->assertUnprocessable()->assertJsonValidationErrors('email');
     }
 
     public function test_registration_and_verification_resend_are_rate_limited(): void

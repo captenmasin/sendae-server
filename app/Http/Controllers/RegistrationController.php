@@ -44,7 +44,7 @@ class RegistrationController extends Controller
         $user->sendEmailVerificationNotification();
         $message = 'Account created. Check your email to verify it, then sign in to Sendae.';
 
-        return $request->expectsJson() ? response()->json(['message' => $message], 201) : redirect('/login')->with('status', $message);
+        return response()->json(['message' => $message], 201);
     }
 
     public function verify(Request $request, string $id, string $hash)
@@ -55,7 +55,7 @@ class RegistrationController extends Controller
             event(new Verified($user));
         }
 
-        return redirect('/login')->with('status', 'Email verified. You can now sign in to Sendae on your Mac.');
+        return response('', 302, ['Location' => 'sendae://verified', 'Cache-Control' => 'no-store']);
     }
 
     public function resend(Request $request)
@@ -79,7 +79,7 @@ class RegistrationController extends Controller
         Password::sendResetLink($data);
         $message = 'If that email has a Sendae account, a password reset link is on its way.';
 
-        return $request->expectsJson() ? response()->json(['message' => $message]) : back()->with('status', $message);
+        return response()->json(['message' => $message]);
     }
 
     public function reset(Request $request)
@@ -95,8 +95,10 @@ class RegistrationController extends Controller
             event(new PasswordReset($user));
         });
 
-        return $status === Password::PasswordReset
-            ? redirect('/login')->with('status', 'Password updated. Sign in with your new password.')
-            : back()->withErrors(['email' => __($status)]);
+        if ($status !== Password::PasswordReset) {
+            throw ValidationException::withMessages(['email' => __($status)]);
+        }
+
+        return response()->json(['message' => 'Password updated. Sign in with your new password.']);
     }
 }

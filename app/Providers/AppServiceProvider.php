@@ -18,6 +18,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->scoped(WorkspaceOwner::class);
+        Passport::ignoreRoutes();
     }
 
     /**
@@ -31,7 +32,6 @@ class AppServiceProvider extends ServiceProvider
             RateLimiter::for($name, fn (Request $request) => Limit::perMinute($limit)->by($request->ip()));
         }
         Passport::personalAccessTokensExpireIn(now()->addMonths(6));
-        Passport::authorizationView('oauth-authorize');
         Passport::tokensCan(['mcp:use' => 'Manage Sendae drafts, media, scheduling and publishing']);
     }
 }

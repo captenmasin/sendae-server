@@ -36,11 +36,11 @@ class ConnectionController extends Controller
         $current = $r->user('web') ?? $r->user();
         abort_if($current && $current->id !== $payload['user_id'], 403, 'This connection link belongs to another account.');
         $user = User::findOrFail($payload['user_id']);
+        abort_unless($user->hasVerifiedEmail(), 403);
         Auth::shouldUse('web');
         Auth::guard('web')->login($user);
         $r->session()->regenerate();
         $r->setUserResolver(fn () => Auth::guard('web')->user());
-        $r->session()->put('social_desktop', true);
 
         return app(WorkspaceOwner::class)->run($user->id, fn () => $this->start($r, $payload['provider']), $payload['workspace_id']);
     }
@@ -48,9 +48,6 @@ class ConnectionController extends Controller
     public function start(Request $r, string $provider)
     {
         abort_unless(config('sendae.mode') === 'server', 422, 'Connect accounts from your hosted server.');
-        if ($r->query('workspace_id')) {
-            app(WorkspaceOwner::class)->select($r->validate(['workspace_id' => 'required|string|size:64'])['workspace_id']);
-        }
         $config = $this->provider($provider);
         $state = Str::random(48);
         $verifier = Str::random(64);
@@ -70,7 +67,7 @@ class ConnectionController extends Controller
             $params += ['code_challenge' => rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '='), 'code_challenge_method' => 'S256'];
         }
 
-        return redirect()->away($url.'?'.http_build_query($params));
+        return response('', 302, ['Location' => $url.'?'.http_build_query($params), 'Cache-Control' => 'no-store']);
     }
 
     public function callback(Request $r, string $provider)
@@ -142,25 +139,49 @@ class ConnectionController extends Controller
             }
         }
         abort_unless(count($choices), 422, 'No eligible accounts were returned. Check provider permissions and your account role.');
-        $r->session()->put('social_choices', ['workspace_id' => app(WorkspaceOwner::class)->workspaceId(), 'user_id' => $r->user()->id, 'provider' => $provider, 'accounts' => $choices, 'expires' => time() + 600]);
+        $ticket = Str::random(64);
+        Cache::put('social_choices:'.$ticket, ['workspace_id' => app(WorkspaceOwner::class)->workspaceId(), 'user_id' => $r->user()->id, 'provider' => $provider, 'accounts' => $choices], now()->addMinutes(10));
+        Auth::guard('web')->logout();
+        $r->session()->invalidate();
+        $r->session()->regenerateToken();
 
-        return view('connections', ['provider' => $provider, 'accounts' => $choices]);
+        return response('', 302, ['Location' => 'sendae://connection?ticket='.$ticket, 'Cache-Control' => 'no-store']);
     }
 
-    public function select(Request $r)
+    public function choices(Request $request, string $ticket): array
     {
-        $r->validate(['accounts' => 'required|array|min:1', 'accounts.*' => 'integer|min:0', 'timezone' => 'required|timezone']);
-        $selection = $r->session()->pull('social_choices');
-        abort_unless($selection && $selection['expires'] > time(), 422, 'Connection session expired.');
-        abort_unless(($selection['user_id'] ?? $r->user()->id) === $r->user()->id, 403);
-        app(WorkspaceOwner::class)->select($selection['workspace_id'] ?? $r->user()->workspace_id);
-        foreach ($r->input('accounts') as $index) {
-            abort_unless(isset($selection['accounts'][$index]), 422);
-            $a = $selection['accounts'][$index];
-            Account::updateOrCreate(['provider' => $selection['provider'], 'provider_id' => $a['provider_id']], ['name' => $a['name'], 'credentials' => $a['credentials'], 'status' => 'connected', 'timezone' => $r->timezone]);
-        }
+        $selection = $this->selection($request, $ticket);
 
-        return redirect($r->session()->pull('social_desktop') ? '/connected' : '/');
+        return ['provider' => $selection['provider'], 'workspace_id' => $selection['workspace_id'], 'accounts' => array_map(fn (array $account): array => ['name' => $account['name'], 'provider_id' => $account['provider_id']], $selection['accounts'])];
+    }
+
+    public function select(Request $request, string $ticket): array
+    {
+        $data = $request->validate(['accounts' => 'required|array|min:1', 'accounts.*' => 'integer|min:0|distinct', 'timezone' => 'required|timezone']);
+
+        return Cache::lock('social_selection:'.$ticket, 10)->block(2, function () use ($request, $ticket, $data): array {
+            $selection = $this->selection($request, $ticket);
+            foreach ($data['accounts'] as $index) {
+                abort_unless(isset($selection['accounts'][$index]), 422, 'Choose an account returned by the provider.');
+            }
+            app(WorkspaceOwner::class)->run($request->user()->id, function () use ($selection, $data): void {
+                foreach ($data['accounts'] as $index) {
+                    $account = $selection['accounts'][$index];
+                    Account::updateOrCreate(['provider' => $selection['provider'], 'provider_id' => $account['provider_id']], ['name' => $account['name'], 'credentials' => $account['credentials'], 'status' => 'connected', 'timezone' => $data['timezone']]);
+                }
+            }, $selection['workspace_id']);
+            Cache::forget('social_choices:'.$ticket);
+
+            return ['connected' => true, 'workspace_id' => $selection['workspace_id']];
+        });
+    }
+
+    private function selection(Request $request, string $ticket): array
+    {
+        $selection = Cache::get('social_choices:'.$ticket);
+        abort_unless($selection && $selection['user_id'] === $request->user()->id, 404, 'This connection expired or belongs to another account.');
+
+        return $selection;
     }
 
     private function provider(string $provider): array

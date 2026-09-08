@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Passport\ClientRepository;
+use Laravel\Passport\Passport;
 use Tests\TestCase;
 
 class SessionTest extends TestCase
@@ -51,7 +52,8 @@ class SessionTest extends TestCase
         $first = User::factory()->create();
         $other = User::factory()->create();
         $this->assertNotSame($first->workspace_id, $other->workspace_id);
-        $this->actingAs($other)->getJson('/local/state')->assertOk()->assertJsonCount(0, 'drafts');
+        Passport::actingAs($other, ['mcp:use']);
+        $this->getJson('/api/state')->assertOk()->assertJsonCount(0, 'drafts');
         $this->postJson('/local/settings', [])->assertNotFound();
     }
 }

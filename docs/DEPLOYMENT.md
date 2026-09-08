@@ -1,5 +1,19 @@
 # Hosted service setup
 
+## Ploi
+
+Create a Laravel site, web directory `public`, PHP 8.3+ (8.5 if available), project root the repository. Point the document root at `public/`. Do not enable zero-downtime until storage, `.env`, and Passport keys are on a shared path.
+
+Paste `.ploi/deploy.sh` into **Repository → Deploy script**. Ploi substitutes `{SITE_DIRECTORY}`, `{BRANCH}`, `{SITE_PHP}`, `{SITE_COMPOSER}`, and `{RELOAD_PHP_FPM}`. Create the `.env` in Ploi before the first deploy; the script will not invent an `APP_KEY`.
+
+In **Settings → PHP**, set memory to at least 512 MB, `upload_max_filesize=100M`, and `post_max_size=140M`. Enable the Laravel scheduler (every minute). Add one daemon from the site directory, not a timestamped release folder:
+
+```sh
+{SITE_PHP} artisan queue:work --sleep=3 --tries=1 --timeout=840
+```
+
+Replace `{SITE_PHP}` with the site PHP binary shown in Ploi (for example `php8.5`). After each deploy the script runs `queue:restart` so Supervisor picks up the new code.
+
 ## Host requirements
 
 Deploy the Sendae-server project with its own environment and database. The domain must use valid HTTPS, point its document root at `public/`, and run PHP 8.3+ with SQLite or a Laravel-supported database, mbstring, fileinfo, openssl, curl, and a persistent writable storage directory. Keep `APP_KEY`, the database, OAuth signing keys, and `storage/app/private` in backups together. Never regenerate an existing production APP_KEY: it encrypts saved credentials.
@@ -36,7 +50,7 @@ php artisan passport:client --personal --name='Sendae desktop' --provider=users 
 php artisan optimize
 ```
 
-Package the desktop with `SENDAE_SERVICE_URL=https://YOUR-DOMAIN`. Users register and verify their email, then sign in; no publishing-server or access-token controls are exposed. The desktop keeps each account’s local data in its own workspace. Desktop tokens expire after six months; sign in again to renew. Sign-out revokes the current token. Public registration, email verification and password recovery are implemented. There is no team/billing functionality. Deploy the frontend assets produced by `npm ci && npm run build` as well.
+Package the desktop with `SENDAE_SERVICE_URL=https://YOUR-DOMAIN`. Users register and verify their email, then sign in; no publishing-server or access-token controls are exposed. The desktop keeps each account’s local data in its own workspace. Desktop tokens expire after six months; sign in again to renew. Sign-out revokes the current token. Public registration, email verification and password recovery are implemented. There is no team/billing functionality. The server requires no frontend build and serves no HTML screens. Ship the updated Sendae desktop alongside this server: it registers the `sendae://` scheme and owns password reset, social-account selection and MCP consent.
 
 Schedule Laravel once per minute:
 
@@ -91,13 +105,13 @@ Register exact callbacks:
 | LinkedIn profile | `https://YOUR-DOMAIN/oauth/linkedin/callback` | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` |
 | LinkedIn Company Page | `https://YOUR-DOMAIN/oauth/linkedin_page/callback` | Same LinkedIn app; `LINKEDIN_PAGES_APPROVED=true` after approval |
 
-The UI lets each user choose accounts returned by OAuth. The desktop opens a short-lived connection link in the system browser so users do not need a separate website sign-in. Disconnection erases stored credentials and cancels queued work; it does not revoke the provider's app grant.
+Sendae lets each user choose accounts returned by OAuth. The desktop opens a short-lived connection link in the system browser and the callback returns to Sendae for account selection; no website sign-in or selection page is served. Disconnection erases stored credentials and cancels queued work; it does not revoke the provider's app grant.
 
 Media stays private. Providers receive an HTTPS URL with a signed two-day expiry when publishing requires public retrieval. Verify those URLs are reachable from outside your network. The first release does not run a storage garbage collector: referenced files and publication snapshots are retained.
 
 ## MCP clients
 
-The hosted endpoint is `https://YOUR-DOMAIN/mcp`. OAuth authorization-server and protected-resource metadata are available under `/.well-known/`. The client registers using `/oauth/register`, uses authorization-code PKCE, and requests `mcp:use`. Each user signs in and consents to access their own workspace. There is no separate per-post approval in Sendae.
+The hosted endpoint is `https://YOUR-DOMAIN/mcp`. OAuth authorization-server and protected-resource metadata are available under `/.well-known/`. The client registers using `/oauth/register`, uses authorization-code PKCE, and requests `mcp:use`. The authorization endpoint opens Sendae, where the user signs in and explicitly consents; Sendae then returns the authorization code to the requesting client. There is no separate per-post approval in Sendae.
 
 Connect that endpoint in Codex, ChatGPT and Claude's custom MCP server settings. Exact UI availability depends on each client/account. Their live OAuth handshakes remain release checks once a public domain exists. Clients that support a bearer token can use a user’s own API token instead.
 
@@ -113,8 +127,9 @@ Tools: workspace, save_draft, attach_media, schedule_post, cancel_publication, r
 4. Schedule exact times and weekly slots, quit the desktop, and confirm server-only delivery. Check local DST behavior in the selected account timezone.
 5. Exercise a temporary rate limit, worker interruption and 24-hour expiry. Verify successful destinations and confirmed thread items are not duplicated.
 6. Exercise OAuth with all three requested MCP clients, including media uploads, schedule, cancel, results and analytics.
-7. Confirm valid analytics permissions, provider-specific names, unavailable-vs-zero display and retained timestamps.
-8. Check actual X API usage charges and storage/transfer costs against the £10/month target.
+7. Verify emailed verification/reset links and OAuth consent open the installed Sendae app from both a running and a closed state.
+8. Confirm valid analytics permissions, provider-specific names, unavailable-vs-zero display and retained timestamps.
+9. Check actual X API usage charges and storage/transfer costs against the £10/month target.
 
 ## Sources checked during implementation
 

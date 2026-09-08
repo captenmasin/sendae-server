@@ -15,7 +15,7 @@ Connect from the desktop Accounts section or `/connect/x` while signed in on the
 
 Sendae uses OAuth 2.0 with PKCE **and** a confidential client secret (`Authorization: Basic` on the token request).
 
-1. Open [developer.x.com](https://developer.x.com/en/portal/dashboard) and create a Project + App.
+1. Open [developer.x.com](https://developer.x.com/en/portal/dashboard) and create a Project, then **Create a new App** inside it. The “Add your App” screen’s **Your Apps** row is a heading, not an app; if the list is empty, leave that connect-existing flow and create an app instead (or use [console.x.com](https://console.x.com/) → Apps → Create App).
 2. Subscribe the project to a paid API access tier that includes posting and media upload (Free is not enough).
 3. App settings → **User authentication settings** → Set up.
 4. App permissions: **Read and write**.
