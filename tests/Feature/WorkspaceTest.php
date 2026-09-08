@@ -110,6 +110,39 @@ class WorkspaceTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_new_request_can_publish_an_unchanged_cancelled_draft_without_duplicating_retries(): void
+    {
+        Queue::fake([PublishAccount::class]);
+        $draft = $this->draft($this->account());
+        $input = ['draft_id' => $draft->id, 'version' => 1, 'mode' => 'now', 'request_id' => (string) Str::uuid()];
+        $first = app(Workspace::class)->schedule($input)[0];
+        $first->update(['status' => 'cancelled']);
+        $input['request_id'] = (string) Str::uuid();
+
+        $second = app(Workspace::class)->schedule($input)[0];
+        app(Workspace::class)->schedule($input);
+
+        $this->assertNotSame($first->id, data_get($second, 'id'));
+        $this->assertDatabaseCount('publications', 2);
+        $this->assertSame('scheduled', $second->fresh()->status);
+        Queue::assertPushed(PublishAccount::class, 1);
+    }
+
+    public function test_meta_attachments_on_a_local_server_are_rejected_before_scheduling(): void
+    {
+        config(['app.url' => 'https://sendae-server.test']);
+        Passport::actingAs(auth()->user(), ['*']);
+        Queue::fake([PublishAccount::class]);
+        $media = Media::create(['name' => 'test.png', 'mime' => 'image/png', 'size' => 16, 'path' => 'media/image']);
+        foreach (['threads', 'facebook'] as $provider) {
+            $draft = $this->draft($this->account($provider), [['text' => 'Test', 'media_ids' => [$media->id]]]);
+            $this->postJson('/api/schedule', ['draft_id' => $draft->id, 'version' => 1, 'mode' => 'now'])
+                ->assertUnprocessable()->assertJsonValidationErrors(['media']);
+        }
+        $this->assertDatabaseCount('publications', 0);
+        Queue::assertNothingPushed();
+    }
+
     public function test_schedule_is_atomic_when_one_network_is_invalid(): void
     {
         $x = $this->account();

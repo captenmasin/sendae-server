@@ -108,6 +108,10 @@ class Workspace
             if ($media->count() !== count($item['media_ids'])) {
                 $this->invalid('media', 'Some attachments have not synchronized.');
             }
+            $mediaHost = strtolower(parse_url(config('app.url'), PHP_URL_HOST) ?? '');
+            if ($media->isNotEmpty() && in_array($account->provider, ['threads', 'facebook']) && ($mediaHost === 'localhost' || str_ends_with($mediaHost, '.test') || str_ends_with($mediaHost, '.localhost'))) {
+                $this->invalid('media', 'Facebook and Threads cannot download attachments from this local server. The publishing backend needs a public HTTPS address before image or video posts can be sent.');
+            }
             $video = $media->contains(fn ($m) => str_starts_with($m->mime, 'video/'));
             $max = ['x' => 4, 'threads' => 20, 'facebook' => 10, 'linkedin' => 20, 'linkedin_page' => 20][$account->provider];
             if ($media->count() > $max || ($video && $media->count() > 1)) {
@@ -131,7 +135,7 @@ class Workspace
         if (config('sendae.mode') !== 'server') {
             $this->invalid('server', 'Connect a hosted server before scheduling. Local drafts are safe.');
         }
-        $data = Validator::make($data, ['draft_id' => ['required', 'uuid', Rule::exists('drafts', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())], 'version' => 'required|integer', 'mode' => 'required|in:exact,queue,now', 'scheduled_at' => 'required_if:mode,exact|date'])->validate();
+        $data = Validator::make($data, ['draft_id' => ['required', 'uuid', Rule::exists('drafts', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())], 'version' => 'required|integer', 'mode' => 'required|in:exact,queue,now', 'scheduled_at' => 'required_if:mode,exact|date', 'request_id' => 'sometimes|required|uuid'])->validate();
         if ($data['mode'] === 'exact' && ! preg_match('/(?:Z|[+-]\d{2}:\d{2})$/', $data['scheduled_at'])) {
             $this->invalid('scheduled_at', 'Include a timezone offset or Z in the scheduled time.');
         }

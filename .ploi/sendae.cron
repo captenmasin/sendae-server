@@ -1,0 +1,1 @@
+* * * * * cd /home/ploi/sendae.app && /usr/bin/php8.4 artisan schedule:run >> /dev/null 2>&1
