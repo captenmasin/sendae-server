@@ -234,6 +234,21 @@ class Workspace
         });
     }
 
+    public function deletePublication(string $id): array
+    {
+        return DB::transaction(function () use ($id) {
+            $publication = Publication::lockForUpdate()->find($id);
+            if ($publication) {
+                if ($publication->status !== 'cancelled') {
+                    $this->invalid('status', 'Only cancelled publications can be deleted.');
+                }
+                $publication->delete();
+            }
+
+            return ['deleted' => true];
+        });
+    }
+
     public function recover(array $data): Publication
     {
         $data = Validator::make($data, ['id' => ['required', 'uuid', Rule::exists('publications', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())], 'action' => 'required|in:confirmed,not_published,reschedule', 'post_id' => 'required_if:action,confirmed|string|max:200', 'scheduled_at' => 'required_unless:action,confirmed|date|after:now'])->validate();

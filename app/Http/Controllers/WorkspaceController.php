@@ -61,6 +61,13 @@ class WorkspaceController extends Controller
         return $w->cancel($r->id);
     }
 
+    public function deletePublication(Request $request, Workspace $workspace): array
+    {
+        $data = $request->validate(['id' => 'required|uuid']);
+
+        return $workspace->deletePublication($data['id']);
+    }
+
     public function recover(Request $r, Workspace $w)
     {
         return $w->recover($r->all());

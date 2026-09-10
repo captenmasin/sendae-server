@@ -56,7 +56,7 @@ class ConnectionController extends Controller
             'threads' => ['https://threads.net/oauth/authorize', 'threads_basic,threads_content_publish,threads_manage_insights'],
             'facebook' => ['https://www.facebook.com/'.config('sendae.meta_version').'/dialog/oauth', 'pages_show_list,pages_read_engagement,pages_manage_posts,read_insights,business_management'],
             'linkedin' => ['https://www.linkedin.com/oauth/v2/authorization', 'openid profile w_member_social'],
-            'linkedin_page' => ['https://www.linkedin.com/oauth/v2/authorization', 'openid profile w_organization_social rw_organization_admin r_organization_social'],
+            'linkedin_page' => ['https://www.linkedin.com/oauth/v2/authorization', 'w_organization_social rw_organization_admin r_organization_social'],
         };
         if ($provider === 'linkedin' && config('sendae.linkedin_personal_analytics')) {
             $scope .= ' r_member_postAnalytics';

@@ -30,7 +30,7 @@ Route::middleware(['auth:api', LocalOrOwner::class, CheckToken::using('mcp:use')
     Route::post('/drafts', [W::class, 'save']);
     Route::post('/media', [W::class, 'upload']);
     Route::get('/media/{media}', [W::class, 'media']);
-    foreach (['deleteDraft', 'schedule', 'cancel', 'recover', 'account', 'disconnect', 'analytics'] as $action) {
+    foreach (['deleteDraft', 'schedule', 'cancel', 'deletePublication', 'recover', 'account', 'disconnect', 'analytics'] as $action) {
         Route::post('/'.$action, [W::class, $action]);
     }
     Route::post('/connect', [ConnectionController::class, 'ticket'])->middleware('throttle:connect');

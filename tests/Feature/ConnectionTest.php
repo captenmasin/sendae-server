@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Laravel\Passport\Passport;
+use PHPUnit\Framework\Attributes\TestWith;
 use Tests\TestCase;
 
 class ConnectionTest extends TestCase
@@ -25,7 +26,7 @@ class ConnectionTest extends TestCase
             'sendae.providers.threads' => ['label' => 'Threads', 'client_id' => 'threads-id', 'client_secret' => 'threads-secret'],
             'sendae.providers.facebook' => ['label' => 'Facebook Page', 'client_id' => 'fb-id', 'client_secret' => 'fb-secret'],
             'sendae.providers.linkedin' => ['label' => 'LinkedIn profile', 'client_id' => 'li-id', 'client_secret' => 'li-secret'],
-            'sendae.providers.linkedin_page' => ['label' => 'LinkedIn Company Page', 'client_id' => 'li-id', 'client_secret' => 'li-secret', 'approved' => false],
+            'sendae.providers.linkedin_page' => ['label' => 'LinkedIn Company Page', 'client_id' => 'li-page-id', 'client_secret' => 'li-page-secret', 'approved' => false],
         ]);
         Http::preventStrayRequests();
     }
@@ -90,6 +91,51 @@ class ConnectionTest extends TestCase
     public function test_expired_connection_ticket_returns_403(): void
     {
         $this->get('/connections/'.str_repeat('a', 64))->assertForbidden();
+    }
+
+    #[TestWith(['linkedin', 'li-id', 'openid profile w_member_social'])]
+    #[TestWith(['linkedin_page', 'li-page-id', 'w_organization_social rw_organization_admin r_organization_social'])]
+    public function test_linkedin_connections_use_their_own_app_and_scopes(string $provider, string $clientId, string $scope): void
+    {
+        config(['sendae.providers.linkedin_page.approved' => true]);
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        $url = $this->postJson('/api/connect', ['provider' => $provider])->assertOk()->json('url');
+        $this->app['auth']->forgetGuards();
+
+        $response = $this->get(parse_url($url, PHP_URL_PATH))->assertRedirect();
+
+        parse_str(parse_url($response->headers->get('Location'), PHP_URL_QUERY), $parameters);
+        $this->assertSame('www.linkedin.com', parse_url($response->headers->get('Location'), PHP_URL_HOST));
+        $this->assertSame($clientId, $parameters['client_id']);
+        $this->assertSame($scope, $parameters['scope']);
+        $this->assertSame('/oauth/'.$provider.'/callback', parse_url($parameters['redirect_uri'], PHP_URL_PATH));
+    }
+
+    public function test_linkedin_page_callback_uses_page_credentials_and_lists_publishable_organizations(): void
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user);
+        Http::fake([
+            'www.linkedin.com/oauth/v2/accessToken' => Http::response(['access_token' => 'page-access', 'expires_in' => 5184000]),
+            'api.linkedin.com/rest/organizationAcls*' => Http::response(['elements' => [
+                ['organization' => 'urn:li:organization:42', 'role' => 'ADMINISTRATOR'],
+                ['organization' => 'urn:li:organization:43', 'role' => 'ANALYST'],
+            ]]),
+            'api.linkedin.com/rest/organizations/42' => Http::response(['localizedName' => 'Sendae']),
+        ]);
+
+        $response = $this->withSession([
+            'social_oauth' => ['workspace_id' => $user->workspace_id, 'user_id' => $user->id, 'state' => 'oauth-state', 'provider' => 'linkedin_page', 'started' => time()],
+        ])->get('/oauth/linkedin_page/callback?state=oauth-state&code=auth-code')->assertRedirect();
+
+        Http::assertSent(fn ($request) => $request->url() === 'https://www.linkedin.com/oauth/v2/accessToken'
+            && $request['client_id'] === 'li-page-id' && $request['client_secret'] === 'li-page-secret');
+        parse_str(parse_url($response->headers->get('Location'), PHP_URL_QUERY), $link);
+        Passport::actingAs($user, ['mcp:use']);
+        $this->getJson('/api/connections/'.$link['ticket'])->assertOk()->assertExactJson([
+            'provider' => 'linkedin_page', 'workspace_id' => $user->workspace_id,
+            'accounts' => [['provider_id' => 'urn:li:organization:42', 'name' => 'Sendae']],
+        ]);
     }
 
     public function test_website_cannot_start_provider_oauth(): void
