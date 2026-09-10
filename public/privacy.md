@@ -8,8 +8,6 @@ Sendae helps you draft, schedule and publish social posts from your desktop. Thi
 
 Sendae is operated by **SPACEMANCODES LTD**, registered in England and Wales under company number **12193639**. We are responsible for the personal information described in this policy.
 
-Registered office: 3 Station Road, Parson Drove, Wisbech, England, PE13 4HA.
-
 For privacy questions or requests, email [mason@spacemancodes.com](mailto:mason@spacemancodes.com).
 
 ## Information we handle
