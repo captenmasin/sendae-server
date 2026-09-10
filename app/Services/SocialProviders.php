@@ -35,17 +35,21 @@ class SocialProviders
 
     public function avatarUrl(Account $account): ?string
     {
-        if ($account->status !== 'connected' || ! in_array($account->provider, ['threads', 'facebook'])) {
+        if ($account->status !== 'connected' || ! in_array($account->provider, ['threads', 'facebook', 'linkedin', 'x'])) {
             return null;
         }
 
         return Cache::remember('account-avatar:'.$account->id.':'.$account->updated_at?->getTimestamp(), now()->addHour(), function () use ($account): array {
             try {
                 $client = $this->client($account)->connectTimeout(2)->timeout(3)->withoutRedirecting();
-                $response = $account->provider === 'threads'
-                    ? $client->get('https://graph.threads.net/v1.0/me', ['fields' => 'threads_profile_picture_url'])
-                    : $client->get('https://graph.facebook.com/'.config('sendae.meta_version').'/me', ['fields' => 'picture.width(96).height(96)']);
-                $url = $response->successful() ? $response->json($account->provider === 'threads' ? 'threads_profile_picture_url' : 'picture.data.url') : null;
+                [$endpoint, $query, $field] = match ($account->provider) {
+                    'threads' => ['https://graph.threads.net/v1.0/me', ['fields' => 'threads_profile_picture_url'], 'threads_profile_picture_url'],
+                    'facebook' => ['https://graph.facebook.com/'.config('sendae.meta_version').'/me', ['fields' => 'picture.width(96).height(96)'], 'picture.data.url'],
+                    'linkedin' => ['https://api.linkedin.com/v2/userinfo', [], 'picture'],
+                    'x' => ['https://api.x.com/2/users/me', ['user.fields' => 'profile_image_url'], 'data.profile_image_url'],
+                };
+                $response = $client->get($endpoint, $query);
+                $url = $response->successful() ? $response->json($field) : null;
 
                 return ['url' => is_string($url) && filter_var($url, FILTER_VALIDATE_URL) && parse_url($url, PHP_URL_SCHEME) === 'https' && ! parse_url($url, PHP_URL_USER) ? $url : null];
             } catch (ConnectionException|ProviderFailure) {

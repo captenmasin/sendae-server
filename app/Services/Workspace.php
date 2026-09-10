@@ -268,7 +268,7 @@ class Workspace
                 $complete = count($receipts) === count($p->snapshot['items']);
                 $p->update(['receipts' => $receipts, 'status' => $complete ? 'published' : ($p->scheduled_at->addHours(24)->isPast() ? 'missed' : 'retry'), 'published_at' => $complete ? now() : null, 'next_attempt_at' => null, 'error' => null]);
             } else {
-                $allowed = $data['action'] === 'not_published' ? ['uncertain'] : ['failed', 'missed', 'cancelled'];
+                $allowed = $data['action'] === 'not_published' ? ['uncertain'] : ['scheduled', 'retry', 'failed', 'missed', 'cancelled'];
                 if (! in_array($p->status, $allowed)) {
                     $this->invalid('status', 'This publication cannot be rescheduled in its current state.');
                 }

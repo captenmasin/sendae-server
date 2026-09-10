@@ -39,6 +39,25 @@ class AccountAvatarsTest extends TestCase
         Http::assertSentCount(4);
     }
 
+    #[TestWith(['linkedin', 'https://api.linkedin.com/v2/userinfo', ['picture' => 'https://images.example/linkedin.jpg'], 'https://images.example/linkedin.jpg'])]
+    #[TestWith(['x', 'https://api.x.com/2/users/me?user.fields=profile_image_url', ['data' => ['profile_image_url' => 'https://images.example/x.jpg']], 'https://images.example/x.jpg'])]
+    #[TestWith(['linkedin', 'https://api.linkedin.com/v2/userinfo', [], null])]
+    #[TestWith(['x', 'https://api.x.com/2/users/me?user.fields=profile_image_url', ['data' => []], null])]
+    #[TestWith(['linkedin', 'https://api.linkedin.com/v2/userinfo', ['picture' => 'https://images.example/linkedin.jpg'], null, 403])]
+    #[TestWith(['x', 'https://api.x.com/2/users/me?user.fields=profile_image_url', ['data' => ['profile_image_url' => 'https://images.example/x.jpg']], null, 429])]
+    public function test_state_returns_and_caches_linkedin_and_x_pictures(string $provider, string $endpoint, array $body, ?string $picture, int $status = 200): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([$endpoint => Http::response($body, $status)]);
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        Account::create(['provider' => $provider, 'provider_id' => 'profile', 'name' => 'Profile', 'credentials' => ['access_token' => 'profile-secret']]);
+
+        $this->getJson('/api/state')->assertOk()->assertJsonPath('accounts.0.avatar_url', $picture)->assertDontSee('profile-secret');
+        $this->getJson('/api/state')->assertOk()->assertJsonPath('accounts.0.avatar_url', $picture);
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request) => $request->hasHeader('Authorization', 'Bearer profile-secret'));
+    }
+
     public function test_avatar_connection_failure_does_not_block_state_or_retry_on_every_sync(): void
     {
         Http::preventStrayRequests();
@@ -70,7 +89,7 @@ class AccountAvatarsTest extends TestCase
         Http::preventStrayRequests();
         Passport::actingAs(User::factory()->create(), ['mcp:use']);
         Account::create(['provider' => 'threads', 'provider_id' => 'threads', 'name' => 'Disconnected', 'status' => 'disconnected']);
-        Account::create(['provider' => 'x', 'provider_id' => 'x', 'name' => 'X']);
+        Account::create(['provider' => 'linkedin_page', 'provider_id' => 'urn:li:organization:123', 'name' => 'Page', 'credentials' => ['access_token' => 'page-secret']]);
         $this->getJson('/api/state')->assertOk()->assertJsonPath('accounts.0.avatar_url', null)->assertJsonPath('accounts.1.avatar_url', null);
         Http::assertNothingSent();
     }

@@ -60,9 +60,10 @@ class WorkspaceTest extends TestCase
 
     public function test_credentials_are_encrypted_and_never_returned_in_state(): void
     {
+        Http::fake(['https://api.x.com/2/users/me?user.fields=profile_image_url' => Http::response(['data' => []])]);
         $a = $this->account();
         $this->assertStringNotContainsString('test-secret', $a->getRawOriginal('credentials'));
-        $this->assertArrayNotHasKey('credentials', app(Workspace::class)->state()['accounts'][0]->toArray());
+        $this->assertArrayNotHasKey('credentials', app(Workspace::class)->state()['accounts'][0]);
         $this->assertSame('test-secret', $a->fresh()->credentials['access_token']);
     }
 
