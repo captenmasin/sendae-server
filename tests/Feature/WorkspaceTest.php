@@ -285,19 +285,15 @@ class WorkspaceTest extends TestCase
         Http::assertSentCount(2);
     }
 
-    public function test_conflicting_edits_return_a_copy_with_a_usable_version(): void
+    public function test_stale_edits_overwrite_the_existing_draft(): void
     {
         Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        config(['sendae.draft_limit' => 1]);
         $payload = ['id' => (string) Str::uuid(), 'title' => 'Shared draft', 'version' => 0, 'content' => ['items' => [['text' => 'First', 'media_ids' => []]], 'overrides' => [], 'account_ids' => []]];
         $this->postJson('/api/drafts', $payload)->assertOk()->assertJsonPath('draft.version', 1);
         $payload['content']['items'][0]['text'] = 'Stale client';
-        $response = $this->postJson('/api/drafts', $payload)->assertOk()->assertJsonPath('conflict.title', 'Shared draft (conflict copy)')->assertJsonPath('conflict.version', 1);
-        $this->postJson('/api/drafts', [
-            'id' => $response->json('conflict.id'),
-            'title' => $response->json('conflict.title'),
-            'version' => $response->json('conflict.version'),
-            'content' => $response->json('conflict.content'),
-        ])->assertOk()->assertJsonPath('draft.version', 2)->assertJsonPath('conflict', null);
+        $this->postJson('/api/drafts', $payload)->assertOk()->assertJsonPath('draft.version', 2)->assertJsonPath('draft.content.items.0.text', 'Stale client')->assertJsonPath('conflict', null);
+        $this->assertDatabaseCount('drafts', 1);
     }
 
     public function test_mcp_tools_share_draft_operations(): void
