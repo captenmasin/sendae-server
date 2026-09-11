@@ -11,7 +11,7 @@ class Workspace extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'user_id', 'name', 'icon'];
+    protected $fillable = ['id', 'user_id', 'name', 'icon', 'image'];
 
     protected $hidden = ['user_id'];
 

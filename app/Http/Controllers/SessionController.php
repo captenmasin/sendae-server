@@ -21,6 +21,7 @@ class SessionController extends Controller
         return response()->json([
             'token' => $user->createToken('Sendae desktop', ['mcp:use'])->accessToken,
             'workspace_id' => $workspace,
+            'name' => $user->name,
             'email' => $user->email,
         ])->header('Cache-Control', 'no-store');
     }

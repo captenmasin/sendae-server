@@ -24,7 +24,7 @@ class User extends Authenticatable implements OAuthenticatable
             $user->workspace_id = hash('sha256', (string) Str::uuid());
         });
         static::created(function (User $user) {
-            Workspace::create(['id' => $user->workspace_id, 'user_id' => $user->id, 'name' => 'Personal', 'icon' => '◻']);
+            Workspace::create(['id' => $user->workspace_id, 'user_id' => $user->id, 'name' => 'Personal', 'icon' => 'P']);
         });
     }
 

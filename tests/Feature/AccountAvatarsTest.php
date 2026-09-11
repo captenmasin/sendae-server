@@ -40,11 +40,11 @@ class AccountAvatarsTest extends TestCase
     }
 
     #[TestWith(['linkedin', 'https://api.linkedin.com/v2/userinfo', ['picture' => 'https://images.example/linkedin.jpg'], 'https://images.example/linkedin.jpg'])]
-    #[TestWith(['x', 'https://api.x.com/2/users/me?user.fields=profile_image_url', ['data' => ['profile_image_url' => 'https://images.example/x.jpg']], 'https://images.example/x.jpg'])]
+    #[TestWith(['x', 'https://api.x.com/2/users/me*', ['data' => ['profile_image_url' => 'https://images.example/x.jpg']], 'https://images.example/x.jpg'])]
     #[TestWith(['linkedin', 'https://api.linkedin.com/v2/userinfo', [], null])]
-    #[TestWith(['x', 'https://api.x.com/2/users/me?user.fields=profile_image_url', ['data' => []], null])]
+    #[TestWith(['x', 'https://api.x.com/2/users/me*', ['data' => []], null])]
     #[TestWith(['linkedin', 'https://api.linkedin.com/v2/userinfo', ['picture' => 'https://images.example/linkedin.jpg'], null, 403])]
-    #[TestWith(['x', 'https://api.x.com/2/users/me?user.fields=profile_image_url', ['data' => ['profile_image_url' => 'https://images.example/x.jpg']], null, 429])]
+    #[TestWith(['x', 'https://api.x.com/2/users/me*', ['data' => ['profile_image_url' => 'https://images.example/x.jpg']], null, 429])]
     public function test_state_returns_and_caches_linkedin_and_x_pictures(string $provider, string $endpoint, array $body, ?string $picture, int $status = 200): void
     {
         Http::preventStrayRequests();

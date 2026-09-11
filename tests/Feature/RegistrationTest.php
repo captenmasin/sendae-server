@@ -35,7 +35,7 @@ class RegistrationTest extends TestCase
         $this->assertTrue(Hash::check($input['password'], $user->password));
         Notification::assertNothingSent();
         $this->assertNull($user->email_verified_at);
-        $this->postJson('/api/session', $input)->assertOk()->assertJsonPath('workspace_id', $user->workspace_id);
+        $this->postJson('/api/session', $input)->assertOk()->assertJsonPath('workspace_id', $user->workspace_id)->assertJsonPath('name', 'First customer');
         $this->postJson('/api/register', $input)->assertUnprocessable()->assertJsonValidationErrors('email');
         $this->assertDatabaseCount('users', 1);
     }

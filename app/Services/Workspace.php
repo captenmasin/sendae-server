@@ -32,7 +32,11 @@ class Workspace
             }
         }
 
-        return ['deleted_draft_ids' => Draft::onlyTrashed()->pluck('id'), 'drafts' => Draft::orderByDesc('updated_at')->get(), 'accounts' => $accounts->map(fn (Account $account): array => $account->toArray() + ['avatar_url' => app(SocialProviders::class)->avatarUrl($account)]),
+        return ['deleted_draft_ids' => Draft::onlyTrashed()->pluck('id'), 'drafts' => Draft::orderByDesc('updated_at')->get(), 'accounts' => $accounts->map(function (Account $account): array {
+            $profile = app(SocialProviders::class)->profile($account);
+
+            return $account->toArray() + $profile;
+        }),
             'media' => Media::latest()->get(), 'publications' => $publications,
             'settings' => ['workspace_id' => app(WorkspaceOwner::class)->workspaceId(), 'workspaces' => \App\Models\Workspace::where('user_id', app(WorkspaceOwner::class)->requireId())->orderBy('created_at')->get(), 'mode' => config('sendae.mode'), 'mcp_url' => url('/mcp'), 'connections_url' => url('/'), 'paired' => false, 'providers' => collect(config('sendae.providers'))->map(fn ($p) => ['label' => $p['label'], 'configured' => $p['configured'] ?? (bool) ($p['client_id'] ?? null), 'approved' => $p['approved'] ?? true])]];
     }

@@ -35,28 +35,48 @@ class SocialProviders
 
     public function avatarUrl(Account $account): ?string
     {
+        return $this->profile($account)['avatar_url'];
+    }
+
+    public function verified(Account $account): bool
+    {
+        return $this->profile($account)['verified'];
+    }
+
+    /**
+     * @return array{avatar_url: ?string, verified: bool}
+     */
+    public function profile(Account $account): array
+    {
         if ($account->status !== 'connected' || ! in_array($account->provider, ['threads', 'facebook', 'linkedin', 'x', 'bluesky'])) {
-            return null;
+            return ['avatar_url' => null, 'verified' => false];
         }
 
-        return Cache::remember('account-avatar:'.$account->id.':'.$account->updated_at?->getTimestamp(), now()->addHour(), function () use ($account): array {
+        return Cache::remember('account-profile:'.$account->id.':'.$account->updated_at?->getTimestamp(), now()->addHour(), function () use ($account): array {
             try {
                 $client = ($account->provider === 'bluesky' ? Http::acceptJson() : $this->client($account))->connectTimeout(2)->timeout(3)->withoutRedirecting();
                 [$endpoint, $query, $field] = match ($account->provider) {
                     'bluesky' => ['https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile', ['actor' => $account->provider_id], 'avatar'],
-                    'threads' => ['https://graph.threads.net/v1.0/me', ['fields' => 'threads_profile_picture_url'], 'threads_profile_picture_url'],
-                    'facebook' => ['https://graph.facebook.com/'.config('sendae.meta_version').'/me', ['fields' => 'picture.width(96).height(96)'], 'picture.data.url'],
+                    'threads' => ['https://graph.threads.net/v1.0/me', ['fields' => 'threads_profile_picture_url,is_verified'], 'threads_profile_picture_url'],
+                    'facebook' => ['https://graph.facebook.com/'.config('sendae.meta_version').'/me', ['fields' => 'picture.width(96).height(96),verification_status'], 'picture.data.url'],
                     'linkedin' => ['https://api.linkedin.com/v2/userinfo', [], 'picture'],
-                    'x' => ['https://api.x.com/2/users/me', ['user.fields' => 'profile_image_url'], 'data.profile_image_url'],
+                    'x' => ['https://api.x.com/2/users/me', ['user.fields' => 'profile_image_url,verified'], 'data.profile_image_url'],
                 };
                 $response = $client->get($endpoint, $query);
                 $url = $response->successful() ? $response->json($field) : null;
+                $verified = $response->successful() && match ($account->provider) {
+                    'x' => (bool) $response->json('data.verified'),
+                    'bluesky' => $response->json('verification.verifiedStatus') === 'valid',
+                    'facebook' => in_array($response->json('verification_status'), ['blue_verified', 'gray_verified'], true),
+                    'threads' => (bool) $response->json('is_verified'),
+                    default => false,
+                };
 
-                return ['url' => is_string($url) && filter_var($url, FILTER_VALIDATE_URL) && parse_url($url, PHP_URL_SCHEME) === 'https' && ! parse_url($url, PHP_URL_USER) ? $url : null];
+                return ['avatar_url' => is_string($url) && filter_var($url, FILTER_VALIDATE_URL) && parse_url($url, PHP_URL_SCHEME) === 'https' && ! parse_url($url, PHP_URL_USER) ? $url : null, 'verified' => $verified];
             } catch (ConnectionException|ProviderFailure) {
-                return ['url' => null];
+                return ['avatar_url' => null, 'verified' => false];
             }
-        })['url'];
+        });
     }
 
     public function client(Account $a)

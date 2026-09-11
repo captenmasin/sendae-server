@@ -3,6 +3,7 @@
 use App\Http\Controllers\AuthorizationController;
 use App\Http\Controllers\ConnectionController;
 use App\Http\Controllers\RegistrationController;
+use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\SessionController;
 use App\Http\Controllers\WorkspaceController as W;
 use App\Http\Controllers\WorkspacesController;
@@ -25,6 +26,10 @@ Route::middleware(['auth:api', LocalOrOwner::class, CheckToken::using('mcp:use')
     Route::get('/workspaces', [WorkspacesController::class, 'index']);
     Route::post('/workspaces', [WorkspacesController::class, 'store']);
     Route::patch('/workspaces/{workspace}', [WorkspacesController::class, 'update']);
+    Route::get('/workspaces/{workspace}/image', [WorkspacesController::class, 'image']);
+    Route::post('/workspaces/{workspace}/image', [WorkspacesController::class, 'uploadImage']);
+    Route::delete('/workspaces/{workspace}/image', [WorkspacesController::class, 'destroyImage']);
+    Route::patch('/profile', [ProfileController::class, 'update']);
     Route::delete('/session', [SessionController::class, 'destroy']);
     Route::get('/state', [W::class, 'state']);
     Route::post('/drafts', [W::class, 'save']);

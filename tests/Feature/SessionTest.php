@@ -19,7 +19,7 @@ class SessionTest extends TestCase
         config(['passport.private_key' => $private, 'passport.public_key' => openssl_pkey_get_details($key)['key']]);
         app(ClientRepository::class)->createPersonalAccessGrantClient('Test desktop', 'users');
         $user = User::factory()->unverified()->create();
-        $response = $this->postJson('/api/session', ['email' => $user->email, 'password' => 'password'])->assertOk()->assertHeader('Cache-Control', 'no-store, private')->assertJsonPath('email', $user->email);
+        $response = $this->postJson('/api/session', ['email' => $user->email, 'password' => 'password'])->assertOk()->assertHeader('Cache-Control', 'no-store, private')->assertJsonPath('email', $user->email)->assertJsonPath('name', $user->name);
         $this->assertSame($user->workspace_id, $response->json('workspace_id'));
         $token = $response->json('token');
         $this->withToken($token)->getJson('/api/state')->assertOk();
