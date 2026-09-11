@@ -35,14 +35,15 @@ class SocialProviders
 
     public function avatarUrl(Account $account): ?string
     {
-        if ($account->status !== 'connected' || ! in_array($account->provider, ['threads', 'facebook', 'linkedin', 'x'])) {
+        if ($account->status !== 'connected' || ! in_array($account->provider, ['threads', 'facebook', 'linkedin', 'x', 'bluesky'])) {
             return null;
         }
 
         return Cache::remember('account-avatar:'.$account->id.':'.$account->updated_at?->getTimestamp(), now()->addHour(), function () use ($account): array {
             try {
-                $client = $this->client($account)->connectTimeout(2)->timeout(3)->withoutRedirecting();
+                $client = ($account->provider === 'bluesky' ? Http::acceptJson() : $this->client($account))->connectTimeout(2)->timeout(3)->withoutRedirecting();
                 [$endpoint, $query, $field] = match ($account->provider) {
+                    'bluesky' => ['https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile', ['actor' => $account->provider_id], 'avatar'],
                     'threads' => ['https://graph.threads.net/v1.0/me', ['fields' => 'threads_profile_picture_url'], 'threads_profile_picture_url'],
                     'facebook' => ['https://graph.facebook.com/'.config('sendae.meta_version').'/me', ['fields' => 'picture.width(96).height(96)'], 'picture.data.url'],
                     'linkedin' => ['https://api.linkedin.com/v2/userinfo', [], 'picture'],
@@ -124,6 +125,7 @@ class SocialProviders
         }
 
         return match ($a->provider) {
+            'bluesky' => app(Bluesky::class)->publish($a, $item['text'], $media, $reply),
             'x' => $this->x($a, $item['text'], $media, $reply),
             'threads' => $this->threads($a, $item['text'], $media, $reply),
             'facebook' => $this->facebook($a, $item['text'], $media),
@@ -299,7 +301,11 @@ class SocialProviders
         if (! $a || $expected === null) {
             throw new ProviderFailure('No unfinished thread item to verify.');
         }
-        if ($a->provider === 'x') {
+        if ($a->provider === 'bluesky') {
+            $d = app(Bluesky::class)->record($a, $id);
+            $owner = $a->provider_id;
+            $text = $d['value']['text'] ?? null;
+        } elseif ($a->provider === 'x') {
             $d = $this->send($a, 'GET', 'https://api.x.com/2/tweets/'.rawurlencode($id), ['tweet.fields' => 'author_id'])->json('data');
             $owner = $d['author_id'] ?? null;
             $text = $d['text'] ?? null;
@@ -323,6 +329,9 @@ class SocialProviders
 
     public function metrics(Account $a, string $id): array
     {
+        if ($a->provider === 'bluesky') {
+            return app(Bluesky::class)->metrics($a, $id);
+        }
         if ($a->provider === 'x') {
             $m = $this->send($a, 'GET', 'https://api.x.com/2/tweets/'.rawurlencode($id), ['tweet.fields' => 'public_metrics'])->json('data.public_metrics', []);
 

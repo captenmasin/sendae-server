@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Account;
 use App\Models\User;
+use App\Services\Bluesky;
 use App\Services\WorkspaceOwner;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -26,6 +27,14 @@ class ConnectionController extends Controller
         ], now()->addMinutes(10));
 
         return ['url' => url('/connections/'.$ticket)];
+    }
+
+    public function bluesky(Request $request, Bluesky $bluesky): array
+    {
+        $data = $request->validate(['identifier' => 'required|string|max:253', 'password' => 'required|string|max:100', 'timezone' => 'required|timezone']);
+        $bluesky->connect($data['identifier'], $data['password'], $data['timezone']);
+
+        return ['connected' => true, 'workspace_id' => app(WorkspaceOwner::class)->workspaceId()];
     }
 
     public function claim(Request $r, string $ticket)
@@ -186,7 +195,7 @@ class ConnectionController extends Controller
     private function provider(string $provider): array
     {
         $config = config("sendae.providers.$provider");
-        abort_unless($config && $config['client_id'] && $config['client_secret'], 422, 'Add this provider’s developer app credentials to the hosted server first. See the deployment guide.');
+        abort_unless($config && ($config['client_id'] ?? null) && ($config['client_secret'] ?? null), 422, 'Add this provider’s developer app credentials to the hosted server first. See the deployment guide.');
         abort_if(($config['approved'] ?? true) === false, 422, 'LinkedIn Company Page access is awaiting approval.');
 
         return $config;

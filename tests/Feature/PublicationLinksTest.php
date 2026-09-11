@@ -87,8 +87,9 @@ class PublicationLinksTest extends TestCase
         Passport::actingAs(User::factory()->create(), ['mcp:use']);
         $this->publication(provider: 'x');
         $this->publication(status: 'disconnected');
+        Http::fake(['https://api.x.com/2/users/me?user.fields=profile_image_url' => Http::response(['data' => []])]);
 
         $this->getJson('/api/state')->assertOk()->assertJsonCount(2, 'publications');
-        Http::assertNothingSent();
+        Http::assertSentCount(1);
     }
 }

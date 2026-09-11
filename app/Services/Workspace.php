@@ -34,7 +34,7 @@ class Workspace
 
         return ['deleted_draft_ids' => Draft::onlyTrashed()->pluck('id'), 'drafts' => Draft::orderByDesc('updated_at')->get(), 'accounts' => $accounts->map(fn (Account $account): array => $account->toArray() + ['avatar_url' => app(SocialProviders::class)->avatarUrl($account)]),
             'media' => Media::latest()->get(), 'publications' => $publications,
-            'settings' => ['workspace_id' => app(WorkspaceOwner::class)->workspaceId(), 'workspaces' => \App\Models\Workspace::where('user_id', app(WorkspaceOwner::class)->requireId())->orderBy('created_at')->get(), 'mode' => config('sendae.mode'), 'mcp_url' => url('/mcp'), 'connections_url' => url('/'), 'paired' => false, 'providers' => collect(config('sendae.providers'))->map(fn ($p) => ['label' => $p['label'], 'configured' => (bool) $p['client_id'], 'approved' => $p['approved'] ?? true])]];
+            'settings' => ['workspace_id' => app(WorkspaceOwner::class)->workspaceId(), 'workspaces' => \App\Models\Workspace::where('user_id', app(WorkspaceOwner::class)->requireId())->orderBy('created_at')->get(), 'mode' => config('sendae.mode'), 'mcp_url' => url('/mcp'), 'connections_url' => url('/'), 'paired' => false, 'providers' => collect(config('sendae.providers'))->map(fn ($p) => ['label' => $p['label'], 'configured' => $p['configured'] ?? (bool) ($p['client_id'] ?? null), 'approved' => $p['approved'] ?? true])]];
     }
 
     public function save(array $data, bool $sync = false): array
@@ -109,12 +109,12 @@ class Workspace
         if (in_array($account->provider, ['facebook', 'linkedin', 'linkedin_page']) && count($items) > 1) {
             $items = [['text' => implode("\n\n", array_column($items, 'text')), 'media_ids' => array_merge(...array_column($items, 'media_ids'))]];
         }
-        $limit = ['x' => 280, 'threads' => 500, 'facebook' => 63206, 'linkedin' => 3000, 'linkedin_page' => 3000][$account->provider];
+        $limit = ['bluesky' => 300, 'x' => 280, 'threads' => 500, 'facebook' => 63206, 'linkedin' => 3000, 'linkedin_page' => 3000][$account->provider];
         foreach ($items as $i => $item) {
             if (! trim($item['text']) && ! $item['media_ids']) {
                 $this->invalid('content', "{$account->name}: post ".($i + 1).' is empty.');
             }
-            $length = $account->provider === 'x' ? $this->xLength($item['text']) : mb_strlen($item['text']);
+            $length = $account->provider === 'x' ? $this->xLength($item['text']) : ($account->provider === 'bluesky' ? preg_match_all('/\X/u', $item['text']) : mb_strlen($item['text']));
             if ($length > $limit) {
                 $this->invalid('content', "{$account->name}: post ".($i + 1)." is $length characters; limit is $limit. Edit the network override.");
             }
@@ -126,10 +126,18 @@ class Workspace
             if ($media->isNotEmpty() && in_array($account->provider, ['threads', 'facebook']) && ($mediaHost === 'localhost' || str_ends_with($mediaHost, '.test') || str_ends_with($mediaHost, '.localhost'))) {
                 $this->invalid('media', 'Facebook and Threads cannot download attachments from this local server. The publishing backend needs a public HTTPS address before image or video posts can be sent.');
             }
+            if ($account->provider === 'bluesky') {
+                if (strlen($item['text']) > 3000) {
+                    $this->invalid('content', 'Bluesky post text must not exceed 3,000 UTF-8 bytes.');
+                }
+                if ($media->contains(fn ($attachment) => ! in_array($attachment->mime, ['image/jpeg', 'image/png', 'image/webp']) || $attachment->size > 2000000)) {
+                    $this->invalid('media', 'Bluesky supports JPEG, PNG or WebP images up to 2 MB each. Video publishing is not supported yet.');
+                }
+            }
             $video = $media->contains(fn ($m) => str_starts_with($m->mime, 'video/'));
-            $max = ['x' => 4, 'threads' => 20, 'facebook' => 10, 'linkedin' => 20, 'linkedin_page' => 20][$account->provider];
+            $max = ['bluesky' => 4, 'x' => 4, 'threads' => 20, 'facebook' => 10, 'linkedin' => 20, 'linkedin_page' => 20][$account->provider];
             if ($media->count() > $max || ($video && $media->count() > 1)) {
-                $this->invalid('media', "{$account->name}: use up to $max images or one video per post.");
+                $this->invalid('media', "{$account->name}: use up to $max images".($account->provider === 'bluesky' ? ' per post.' : ' or one video per post.'));
             }
         }
 

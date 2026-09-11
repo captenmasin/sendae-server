@@ -33,5 +33,6 @@ Route::middleware(['auth:api', LocalOrOwner::class, CheckToken::using('mcp:use')
     foreach (['deleteDraft', 'schedule', 'cancel', 'deletePublication', 'recover', 'account', 'disconnect', 'analytics'] as $action) {
         Route::post('/'.$action, [W::class, $action]);
     }
+    Route::post('/connectBluesky', [ConnectionController::class, 'bluesky'])->middleware('throttle:connect');
     Route::post('/connect', [ConnectionController::class, 'ticket'])->middleware('throttle:connect');
 });
