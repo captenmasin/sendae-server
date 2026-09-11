@@ -12,7 +12,7 @@ class SaveDraft extends Tool
 {
     protected string $name = 'save_draft';
 
-    protected string $description = 'Create or edit a draft. Supply a new UUID and version 0 to create. Otherwise use the current version. Content includes items, overrides, and account_ids. A conflict creates a copy and returns both versions.';
+    protected string $description = 'Create or edit a draft. Supply a new UUID and version 0 to create. Otherwise send the current version. A stale version overwrites the existing draft. Content includes items, overrides, and account_ids.';
 
     public function schema(JsonSchema $s): array
     {

@@ -17,7 +17,7 @@ class SendaeServer extends Server
 
     protected string $version = '0.1.3';
 
-    protected string $instructions = 'Manage the authenticated user’s private social publishing workspace. Read workspace first for account and draft IDs. Draft content has items [{text,media_ids}], overrides keyed by provider (x,bluesky,threads,facebook,linkedin,linkedin_page) with arrays of items, and account_ids. Use the current version when editing. Conflicting edits preserve both versions. Schedule/publish require an authenticated hosted server and publish without another in-app approval. Never retry uncertain publications without verifying the provider outcome. Media upload accepts base64 bytes; provider tokens are never returned.';
+    protected string $instructions = 'Manage the authenticated user’s private social publishing workspace. Read workspace first for account and draft IDs. Draft content has items [{text,media_ids}], overrides keyed by provider (x,bluesky,threads,facebook,linkedin,linkedin_page) with arrays of items, and account_ids. Use the current version when editing. A stale version overwrites the existing draft. Schedule/publish require an authenticated hosted server and publish without another in-app approval. Never retry uncertain publications without verifying the provider outcome. Media upload accepts base64 bytes; provider tokens are never returned.';
 
     protected array $tools = [RecoverPublication::class, WorkspaceTool::class, SaveDraft::class, AttachMedia::class, SchedulePost::class, CancelPublication::class, RefreshAnalytics::class];
 }

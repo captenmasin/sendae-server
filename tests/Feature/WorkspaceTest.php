@@ -285,6 +285,21 @@ class WorkspaceTest extends TestCase
         Http::assertSentCount(2);
     }
 
+    public function test_conflicting_edits_return_a_copy_with_a_usable_version(): void
+    {
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        $payload = ['id' => (string) Str::uuid(), 'title' => 'Shared draft', 'version' => 0, 'content' => ['items' => [['text' => 'First', 'media_ids' => []]], 'overrides' => [], 'account_ids' => []]];
+        $this->postJson('/api/drafts', $payload)->assertOk()->assertJsonPath('draft.version', 1);
+        $payload['content']['items'][0]['text'] = 'Stale client';
+        $response = $this->postJson('/api/drafts', $payload)->assertOk()->assertJsonPath('conflict.title', 'Shared draft (conflict copy)')->assertJsonPath('conflict.version', 1);
+        $this->postJson('/api/drafts', [
+            'id' => $response->json('conflict.id'),
+            'title' => $response->json('conflict.title'),
+            'version' => $response->json('conflict.version'),
+            'content' => $response->json('conflict.content'),
+        ])->assertOk()->assertJsonPath('draft.version', 2)->assertJsonPath('conflict', null);
+    }
+
     public function test_mcp_tools_share_draft_operations(): void
     {
         SendaeServer::tool(SaveDraft::class, ['id' => (string) Str::uuid(), 'title' => 'From an agent', 'version' => 0, 'content' => ['items' => [['text' => 'Agent-created draft', 'media_ids' => []]], 'overrides' => [], 'account_ids' => []]])->assertOk();

@@ -16,6 +16,6 @@ class Draft extends Model
 
     protected function casts(): array
     {
-        return ['content' => 'array', 'dirty' => 'boolean'];
+        return ['content' => 'array', 'dirty' => 'boolean', 'version' => 'integer', 'synced_version' => 'integer'];
     }
 }
