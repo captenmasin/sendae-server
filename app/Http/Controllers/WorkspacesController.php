@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -30,6 +32,35 @@ class WorkspacesController extends Controller
         $workspace->update($this->validated($request));
 
         return $this->present($workspace);
+    }
+
+    public function destroy(Request $request, string $workspace): array
+    {
+        $files = DB::transaction(function () use ($request, $workspace): array {
+            $user = User::lockForUpdate()->findOrFail($request->user()->id);
+            $workspace = Workspace::where('user_id', $user->id)->lockForUpdate()->findOrFail($workspace);
+            $remaining = Workspace::where('user_id', $user->id)->whereKeyNot($workspace->id)->orderBy('created_at')->first();
+            abort_unless($remaining, 422, 'Create another workspace before deleting your only workspace.');
+            $publications = DB::table('publications')->where('workspace_id', $workspace->id)->lockForUpdate()->get(['status']);
+            abort_if($publications->contains(fn (object $publication): bool => in_array($publication->status, ['publishing', 'uncertain'], true)), 409, 'Wait for publishing to finish and resolve uncertain posts before deleting this workspace.');
+            $files = DB::table('media')->where('workspace_id', $workspace->id)->whereNotNull('path')->pluck('path')->all();
+            if ($workspace->image) {
+                $files[] = $workspace->image;
+            }
+            foreach (['publications', 'drafts', 'accounts', 'media'] as $table) {
+                DB::table($table)->where('workspace_id', $workspace->id)->delete();
+            }
+            if ($user->workspace_id === $workspace->id) {
+                $user->workspace_id = $remaining->id;
+                $user->save();
+            }
+            $workspace->delete();
+
+            return $files;
+        });
+        Storage::disk('local')->delete($files);
+
+        return ['deleted' => true, 'workspace_id' => $request->user()->fresh()->workspace_id, 'workspaces' => $this->index($request)];
     }
 
     public function image(Request $request, string $workspace): BinaryFileResponse

@@ -52,7 +52,7 @@ class SocialProviders
             return ['avatar_url' => null, 'verified' => false];
         }
 
-        return Cache::remember('account-profile:'.$account->id.':'.$account->updated_at?->getTimestamp(), now()->addHour(), function () use ($account): array {
+        return Cache::remember('account-profile:v2:'.$account->id.':'.$account->updated_at?->getTimestamp(), now()->addHour(), function () use ($account): array {
             try {
                 $client = ($account->provider === 'bluesky' ? Http::acceptJson() : $this->client($account))->connectTimeout(2)->timeout(3)->withoutRedirecting();
                 [$endpoint, $query, $field] = match ($account->provider) {
@@ -60,12 +60,12 @@ class SocialProviders
                     'threads' => ['https://graph.threads.net/v1.0/me', ['fields' => 'threads_profile_picture_url,is_verified'], 'threads_profile_picture_url'],
                     'facebook' => ['https://graph.facebook.com/'.config('sendae.meta_version').'/me', ['fields' => 'picture.width(96).height(96),verification_status'], 'picture.data.url'],
                     'linkedin' => ['https://api.linkedin.com/v2/userinfo', [], 'picture'],
-                    'x' => ['https://api.x.com/2/users/me', ['user.fields' => 'profile_image_url,verified'], 'data.profile_image_url'],
+                    'x' => ['https://api.x.com/2/users/me', ['user.fields' => 'profile_image_url,verified,verified_type'], 'data.profile_image_url'],
                 };
                 $response = $client->get($endpoint, $query);
                 $url = $response->successful() ? $response->json($field) : null;
                 $verified = $response->successful() && match ($account->provider) {
-                    'x' => (bool) $response->json('data.verified'),
+                    'x' => $response->json('data.verified') === true || in_array($response->json('data.verified_type'), ['blue', 'business', 'government'], true),
                     'bluesky' => $response->json('verification.verifiedStatus') === 'valid',
                     'facebook' => in_array($response->json('verification_status'), ['blue_verified', 'gray_verified'], true),
                     'threads' => (bool) $response->json('is_verified'),

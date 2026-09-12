@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Laravel\Passport\Passport;
+use PHPUnit\Framework\Attributes\TestWith;
 use Tests\TestCase;
 
 class AccountVerificationTest extends TestCase
@@ -46,5 +47,42 @@ class AccountVerificationTest extends TestCase
 
         $this->getJson('/api/state')->assertOk()->assertJsonPath('accounts.0.verified', false);
         Http::assertNothingSent();
+    }
+
+    #[TestWith(['blue', true])]
+    #[TestWith(['business', true])]
+    #[TestWith(['government', true])]
+    #[TestWith(['none', false])]
+    #[TestWith(['unknown', false])]
+    #[TestWith([null, false])]
+    public function test_state_recognizes_current_x_badges_when_legacy_verification_is_false(?string $type, bool $verified): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://api.x.com/2/users/me*' => Http::response(['data' => ['verified' => false, 'verified_type' => $type]]),
+        ]);
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        Account::create(['provider' => 'x', 'provider_id' => '1', 'name' => 'X user', 'credentials' => ['access_token' => 'secret']]);
+
+        $this->getJson('/api/state')->assertOk()->assertJsonPath('accounts.0.verified', $verified);
+
+        Http::assertSent(fn ($request) => in_array('verified_type', explode(',', $request['user.fields']), true));
+    }
+
+    #[TestWith(['threads', 'https://graph.threads.net/v1.0/me*', ['is_verified' => true], true])]
+    #[TestWith(['threads', 'https://graph.threads.net/v1.0/me*', ['is_verified' => false], false])]
+    #[TestWith(['facebook', 'https://graph.facebook.com/*', ['verification_status' => 'blue_verified'], true])]
+    #[TestWith(['facebook', 'https://graph.facebook.com/*', ['verification_status' => 'not_verified'], false])]
+    #[TestWith(['x', 'https://api.x.com/2/users/me*', ['data' => ['verified' => true, 'verified_type' => 'blue']], false, 403])]
+    public function test_state_uses_successful_provider_verification_responses(string $provider, string $endpoint, array $profile, bool $verified, int $status = 200): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([$endpoint => Http::response($profile, $status)]);
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        Account::create(['provider' => $provider, 'provider_id' => '1', 'name' => 'Profile', 'credentials' => ['access_token' => 'secret']]);
+
+        $this->getJson('/api/state')->assertOk()->assertJsonPath('accounts.0.verified', $verified);
+
+        Http::assertSentCount(1);
     }
 }

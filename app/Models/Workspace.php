@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 
@@ -13,7 +14,14 @@ class Workspace extends Model
 
     protected $fillable = ['id', 'user_id', 'name', 'icon', 'image'];
 
-    protected $hidden = ['user_id'];
+    protected $hidden = ['user_id', 'image'];
+
+    protected $appends = ['has_image'];
+
+    protected function hasImage(): Attribute
+    {
+        return Attribute::get(fn (): bool => filled($this->image));
+    }
 
     protected static function booted(): void
     {

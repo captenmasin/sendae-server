@@ -30,6 +30,7 @@ class WorkspaceImageTest extends TestCase
         $this->assertNotNull(Workspace::find($user->workspace_id)->image);
         $this->get('/api/workspaces/'.$user->workspace_id.'/image')->assertOk()->assertHeader('X-Content-Type-Options', 'nosniff');
         $this->getJson('/api/workspaces')->assertJsonPath('0.has_image', true);
+        $this->getJson('/api/state')->assertOk()->assertJsonPath('settings.workspaces.0.has_image', true)->assertJsonMissingPath('settings.workspaces.0.image');
 
         Passport::actingAs($other, ['mcp:use']);
         $this->get('/api/workspaces/'.$user->workspace_id.'/image')->assertNotFound();
@@ -41,6 +42,7 @@ class WorkspaceImageTest extends TestCase
         $this->assertNull(Workspace::find($user->workspace_id)->image);
         $this->getJson('/api/workspaces/'.$user->workspace_id.'/image')->assertNotFound();
         $this->getJson('/api/workspaces')->assertJsonPath('0.has_image', false);
+        $this->getJson('/api/state')->assertJsonPath('settings.workspaces.0.has_image', false);
     }
 
     public function test_new_workspaces_default_the_icon_to_the_first_letter_and_reject_non_images(): void
