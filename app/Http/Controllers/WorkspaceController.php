@@ -56,9 +56,9 @@ class WorkspaceController extends Controller
 
     public function cancel(Request $r, Workspace $w)
     {
-        $r->validate(['id' => 'required|uuid']);
+        $r->validate(['id' => 'required|uuid', 'separate' => 'sometimes|boolean']);
 
-        return $w->cancel($r->id);
+        return $w->cancel($r->id, $r->boolean('separate'));
     }
 
     public function deletePublication(Request $request, Workspace $workspace): array

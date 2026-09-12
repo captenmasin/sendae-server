@@ -284,12 +284,19 @@ class Workspace
         $this->invalid('slots', 'No free posting slot in the next year.');
     }
 
-    public function cancel(string $id): Publication
+    public function cancel(string $id, bool $separate = false): Publication
     {
-        return DB::transaction(function () use ($id) {
+        return DB::transaction(function () use ($id, $separate) {
+            User::lockForUpdate()->findOrFail(app(WorkspaceOwner::class)->requireId());
             $p = Publication::lockForUpdate()->findOrFail($id);
+            if ($separate && $p->status === 'cancelled') {
+                return $p;
+            }
             if (! in_array($p->status, ['scheduled', 'retry', 'failed', 'missed'])) {
                 $this->invalid('status', 'An in-flight, uncertain, or published post cannot be cancelled.');
+            }
+            if ($separate) {
+                $this->separatePublication($p);
             }
             $p->update(['status' => 'cancelled']);
 
@@ -317,6 +324,7 @@ class Workspace
         $data = Validator::make($data, ['id' => ['required', 'uuid', Rule::exists('publications', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())], 'action' => 'required|in:confirmed,not_published,reschedule', 'post_id' => 'required_if:action,confirmed|string|max:200', 'scheduled_at' => 'required_unless:action,confirmed|date|after:now'])->validate();
 
         return DB::transaction(function () use ($data) {
+            User::lockForUpdate()->findOrFail(app(WorkspaceOwner::class)->requireId());
             $p = Publication::lockForUpdate()->findOrFail($data['id']);
             if ($data['action'] === 'confirmed') {
                 if ($p->status !== 'uncertain') {
@@ -335,11 +343,38 @@ class Workspace
                 if (! in_array($p->status, $allowed)) {
                     $this->invalid('status', 'This publication cannot be rescheduled in its current state.');
                 }
+                if ($data['action'] === 'reschedule') {
+                    $this->separatePublication($p);
+                }
                 $p->update(['scheduled_at' => CarbonImmutable::parse($data['scheduled_at'])->utc(), 'status' => 'scheduled', 'next_attempt_at' => null, 'error' => null]);
             }
 
             return $p;
         });
+    }
+
+    private function separatePublication(Publication $publication): void
+    {
+        $draft = Draft::withTrashed()->lockForUpdate()->find($publication->draft_id);
+        if (! $draft) {
+            return;
+        }
+        $content = $draft->content;
+        $remainingAccounts = array_values(array_diff($content['account_ids'] ?? [], [$publication->account_id]));
+        if (! $remainingAccounts) {
+            return;
+        }
+        $separateDraft = Draft::create([
+            'title' => $publication->snapshot['title'] ?? $draft->title,
+            'content' => [
+                'items' => $publication->snapshot['items'],
+                'overrides' => [],
+                'account_ids' => [$publication->account_id],
+            ],
+        ]);
+        $content['account_ids'] = $remainingAccounts;
+        $draft->update(['content' => $content, 'version' => $draft->version + 1]);
+        $publication->draft_id = $separateDraft->id;
     }
 
     private function once(string $operation, array $data, callable $action): array
