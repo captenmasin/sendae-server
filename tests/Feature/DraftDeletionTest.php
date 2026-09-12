@@ -31,11 +31,19 @@ class DraftDeletionTest extends TestCase
         $this->postJson('/api/deleteDraft', ['id' => $payload['id'], 'version' => 1])->assertJsonPath('deleted', true);
         $this->postJson('/api/deleteDraft', ['id' => $payload['id'], 'version' => 1])->assertOk();
         $this->assertSoftDeleted('drafts', ['id' => $payload['id']]);
-        $this->getJson('/api/state')->assertJsonCount(0, 'drafts')->assertJsonPath('deleted_draft_ids.0', $payload['id']);
+        $this->getJson('/api/state')->assertJsonCount(1, 'drafts')->assertJsonPath('drafts.0.restore_scheduled', true)->assertJsonPath('deleted_draft_ids.0', $payload['id']);
         $this->postJson('/api/drafts', $payload)->assertGone();
         $this->postJson('/api/schedule', ['draft_id' => $payload['id'], 'version' => 1, 'mode' => 'queue'])->assertNotFound();
         $this->assertSame('scheduled', Publication::findOrFail($publication['id'])->status);
         $this->assertSame('Scheduled content', Publication::findOrFail($publication['id'])->snapshot['items'][0]['text']);
+
+        $editable = $this->getJson('/api/state')->json('drafts.0');
+        $editable['content']['items'][0]['text'] = 'Updated scheduled content';
+        $editable['content']['overrides']['x'][0]['text'] = 'Updated scheduled content';
+        $version = $this->postJson('/api/drafts', $editable)->assertOk()->json('draft.version');
+        $this->postJson('/api/schedule', ['draft_id' => $payload['id'], 'version' => $version, 'mode' => 'preserve', 'update' => true])->assertOk();
+        $this->assertNotSoftDeleted('drafts', ['id' => $payload['id']]);
+        $this->assertSame('Updated scheduled content', Publication::findOrFail($publication['id'])->snapshot['items'][0]['text']);
     }
 
     public function test_deleting_an_unknown_or_other_customers_draft_cannot_change_their_workspace(): void

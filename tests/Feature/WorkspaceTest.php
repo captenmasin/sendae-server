@@ -59,6 +59,83 @@ class WorkspaceTest extends TestCase
         return $publication;
     }
 
+    public function test_scheduled_updates_replace_network_content_and_destinations_without_moving_existing_times(): void
+    {
+        $this->freezeTime();
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        $first = $this->account();
+        $removed = $this->account('threads');
+        $added = $this->account('bluesky');
+        $draft = $this->draft($first);
+        $draft->update(['content' => [...$draft->content, 'account_ids' => [$first->id, $removed->id]]]);
+        $original = app(Workspace::class)->schedule(['draft_id' => $draft->id, 'version' => 1, 'mode' => 'exact', 'scheduled_at' => now()->addDay()->toIso8601String()]);
+        $firstPost = collect($original)->firstWhere('account_id', $first->id);
+        $removedPost = collect($original)->firstWhere('account_id', $removed->id);
+        $draft->update(['title' => 'Updated title', 'content' => ['items' => [['text' => 'Updated shared', 'media_ids' => []]], 'overrides' => ['x' => [['text' => 'Updated X', 'media_ids' => []]]], 'account_ids' => [$first->id, $added->id]]]);
+        $payload = ['draft_id' => $draft->id, 'version' => 1, 'mode' => 'preserve', 'update' => true, 'request_id' => (string) Str::uuid()];
+
+        $this->postJson('/api/schedule', $payload)->assertOk();
+        $this->postJson('/api/schedule', $payload)->assertOk();
+
+        $this->assertSame('Updated X', $firstPost->fresh()->snapshot['items'][0]['text']);
+        $this->assertSame('Updated title', $firstPost->fresh()->snapshot['title']);
+        $this->assertTrue($firstPost->fresh()->scheduled_at->equalTo(now()->addDay()->startOfSecond()));
+        $this->assertSame('cancelled', $removedPost->fresh()->status);
+        $newPost = Publication::where('account_id', $added->id)->firstOrFail();
+        $this->assertSame('Updated shared', $newPost->snapshot['items'][0]['text']);
+        $this->assertTrue($newPost->scheduled_at->equalTo(now()->addDay()->startOfSecond()));
+        $this->assertDatabaseCount('publications', 3);
+    }
+
+    public function test_updating_can_move_the_schedule_and_invalid_content_rolls_back_every_destination(): void
+    {
+        $this->freezeTime();
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        $account = $this->account();
+        $post = $this->scheduled($account);
+        $payload = ['draft_id' => $post->draft_id, 'version' => 1, 'update' => true, 'mode' => 'exact', 'scheduled_at' => now()->addDays(2)->toIso8601String()];
+
+        $this->postJson('/api/schedule', $payload)->assertOk();
+        $this->assertTrue($post->fresh()->scheduled_at->equalTo(now()->addDays(2)->startOfSecond()));
+        $this->assertDatabaseCount('publications', 1);
+        $original = $post->fresh()->getAttributes();
+        $draft = Draft::findOrFail($post->draft_id);
+        $draft->update(['content' => [...$draft->content, 'items' => [['text' => str_repeat('a', 500), 'media_ids' => []]]]]);
+        $payload['scheduled_at'] = now()->addDays(3)->toIso8601String();
+
+        $this->postJson('/api/schedule', $payload)->assertUnprocessable();
+        $this->assertSame($original, $post->fresh()->getAttributes());
+    }
+
+    #[TestWith(['publishing', []])]
+    #[TestWith(['published', []])]
+    #[TestWith(['uncertain', []])]
+    #[TestWith(['retry', ['live-item']])]
+    #[TestWith(['cancelled', []])]
+    public function test_started_or_inactive_publications_cannot_be_overwritten(string $status, array $receipts): void
+    {
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        $post = $this->scheduled($this->account());
+        $post->update(['status' => $status, 'receipts' => $receipts]);
+        $original = $post->fresh()->getAttributes();
+
+        $this->postJson('/api/schedule', ['draft_id' => $post->draft_id, 'version' => 1, 'mode' => 'preserve', 'update' => true])
+            ->assertUnprocessable()->assertJsonValidationErrors('status');
+
+        $this->assertSame($original, $post->fresh()->getAttributes());
+        $this->assertDatabaseCount('publications', 1);
+    }
+
+    public function test_schedule_updates_require_the_current_version_and_workspace(): void
+    {
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        $post = $this->scheduled($this->account());
+        $payload = ['draft_id' => $post->draft_id, 'version' => 2, 'mode' => 'preserve', 'update' => true];
+        $this->postJson('/api/schedule', $payload)->assertUnprocessable()->assertJsonValidationErrors('version');
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        $this->postJson('/api/schedule', $payload)->assertUnprocessable()->assertJsonValidationErrors('draft_id');
+    }
+
     public function test_credentials_are_encrypted_and_never_returned_in_state(): void
     {
         Http::fake(['https://api.x.com/2/users/me*' => Http::response(['data' => []])]);

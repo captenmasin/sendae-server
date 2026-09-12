@@ -9,6 +9,7 @@ use App\Models\Media;
 use App\Models\Publication;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -32,7 +33,7 @@ class Workspace
             }
         }
 
-        return ['deleted_draft_ids' => Draft::onlyTrashed()->pluck('id'), 'drafts' => Draft::orderByDesc('updated_at')->get(), 'accounts' => $accounts->map(function (Account $account): array {
+        return ['deleted_draft_ids' => Draft::onlyTrashed()->pluck('id'), 'drafts' => $this->draftsForEditing($publications, $accounts), 'accounts' => $accounts->map(function (Account $account): array {
             $profile = app(SocialProviders::class)->profile($account);
 
             return $account->toArray() + $profile;
@@ -41,9 +42,35 @@ class Workspace
             'settings' => ['workspace_id' => app(WorkspaceOwner::class)->workspaceId(), 'workspaces' => \App\Models\Workspace::where('user_id', app(WorkspaceOwner::class)->requireId())->orderBy('created_at')->get(), 'mode' => config('sendae.mode'), 'mcp_url' => url('/mcp'), 'connections_url' => url('/'), 'paired' => false, 'providers' => collect(config('sendae.providers'))->map(fn ($p) => ['label' => $p['label'], 'configured' => $p['configured'] ?? (bool) ($p['client_id'] ?? null), 'approved' => $p['approved'] ?? true])]];
     }
 
+    private function draftsForEditing(Collection $publications, Collection $accounts): Collection
+    {
+        $queued = $publications->whereIn('status', ['scheduled', 'retry', 'publishing'])->groupBy('draft_id');
+
+        return Draft::withTrashed()->where(function ($query) use ($queued) {
+            $query->whereNull('deleted_at')->orWhereIn('id', $queued->keys());
+        })->orderByDesc('updated_at')->get()->map(function (Draft $draft) use ($queued, $accounts): array {
+            $data = $draft->toArray();
+            if ($draft->trashed()) {
+                $posts = $queued->get($draft->id);
+                $overrides = [];
+                foreach ($posts as $post) {
+                    if ($account = $accounts->firstWhere('id', $post->account_id)) {
+                        $overrides[$account->provider] = $post->snapshot['items'];
+                    }
+                }
+                $data['title'] = $posts->first()->snapshot['title'] ?? '';
+                $data['content'] = ['items' => $posts->first()->snapshot['items'], 'overrides' => (object) $overrides, 'account_ids' => $posts->pluck('account_id')->unique()->values()->all()];
+                $data['restore_scheduled'] = true;
+            }
+
+            return $data;
+        });
+    }
+
     public function save(array $data, bool $sync = false): array
     {
         $data = Validator::make($data, [
+            'restore_scheduled' => 'sometimes|boolean',
             'id' => 'required|uuid', 'title' => 'nullable|string|max:200', 'version' => 'required|integer|min:0',
             'content' => 'required|array:items,overrides,account_ids', 'content.items' => 'required|array|min:1|max:30',
             'content.items.*' => 'required|array:text,media_ids', 'content.items.*.text' => 'present|nullable|string|max:65000',
@@ -70,11 +97,15 @@ class Workspace
             }
         }
 
-        abort_if(Draft::onlyTrashed()->whereKey($data['id'])->exists(), 410, 'This draft was deleted.');
+        abort_if(Draft::onlyTrashed()->whereKey($data['id'])->exists() && ! ($data['restore_scheduled'] ?? false), 410, 'This draft was deleted.');
 
         return $this->once('save', $data, function () use ($data, $sync) {
             $draft = Draft::withTrashed()->lockForUpdate()->find($data['id']);
-            abort_if($draft?->trashed(), 410, 'This draft was deleted.');
+            if ($draft?->trashed()) {
+                $queued = Publication::where('draft_id', $draft->id)->whereIn('status', ['scheduled', 'retry'])->lockForUpdate()->get();
+                abort_unless(($data['restore_scheduled'] ?? false) && $queued->isNotEmpty() && $queued->every(fn ($post) => empty($post->receipts)), 410, 'This draft was deleted.');
+                $draft->restore();
+            }
             if (! $draft && Draft::count() >= config('sendae.draft_limit')) {
                 $this->invalid('draft', 'Your workspace draft limit has been reached.');
             }
@@ -155,7 +186,10 @@ class Workspace
         if (config('sendae.mode') !== 'server') {
             $this->invalid('server', 'Connect a hosted server before scheduling. Local drafts are safe.');
         }
-        $data = Validator::make($data, ['draft_id' => ['required', 'uuid', Rule::exists('drafts', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())], 'version' => 'required|integer', 'mode' => 'required|in:exact,queue,now', 'scheduled_at' => 'required_if:mode,exact|date', 'request_id' => 'sometimes|required|uuid'])->validate();
+        $data = Validator::make($data, ['draft_id' => ['required', 'uuid', Rule::exists('drafts', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())], 'version' => 'required|integer', 'mode' => 'required|in:exact,queue,now,preserve', 'update' => 'sometimes|boolean', 'scheduled_at' => 'required_if:mode,exact|date', 'request_id' => 'sometimes|required|uuid'])->validate();
+        if ($data['mode'] === 'preserve' && ! ($data['update'] ?? false)) {
+            $this->invalid('mode', 'An existing schedule is required.');
+        }
         if ($data['mode'] === 'exact' && ! preg_match('/(?:Z|[+-]\d{2}:\d{2})$/', $data['scheduled_at'])) {
             $this->invalid('scheduled_at', 'Include a timezone offset or Z in the scheduled time.');
         }
@@ -170,7 +204,12 @@ class Workspace
             if (! $ids || $accounts->count() !== count($ids)) {
                 $this->invalid('accounts', 'Select connected destination accounts.');
             }
-            if (Publication::where('draft_id', $draft->id)->whereIn('status', ['scheduled', 'retry', 'publishing', 'uncertain'])->exists()) {
+            $existing = Publication::where('draft_id', $draft->id)->where('status', '!=', 'cancelled')->orderBy('id')->lockForUpdate()->get();
+            $updating = $data['update'] ?? false;
+            if ($updating && ($existing->isEmpty() || $existing->contains(fn ($publication) => ! in_array($publication->status, ['scheduled', 'retry']) || ! empty($publication->receipts)))) {
+                $this->invalid('status', 'This post can no longer be updated because publishing has started or its schedule is no longer active.');
+            }
+            if (! $updating && $existing->contains(fn ($publication) => in_array($publication->status, ['scheduled', 'retry', 'publishing', 'uncertain']))) {
                 $this->invalid('draft', 'Cancel existing pending publications before scheduling again.');
             }
             $result = [];
@@ -179,13 +218,31 @@ class Workspace
                     $this->invalid('account', "{$account->name} needs reconnecting or approval.");
                 }
                 $items = $this->items($draft, $account);
+                $publication = $updating ? $existing->firstWhere('account_id', $account->id) : null;
                 $at = match ($data['mode']) {
+                    'preserve' => $publication?->scheduled_at ?? $existing->min('scheduled_at'),
                     'now' => CarbonImmutable::now(), 'queue' => $this->nextSlot($account), default => CarbonImmutable::parse($data['scheduled_at'])->utc()
                 };
                 if ($data['mode'] === 'exact' && $at->isPast()) {
                     $this->invalid('scheduled_at', 'Choose a future time.');
                 }
-                $result[] = Publication::create(['draft_id' => $draft->id, 'account_id' => $account->id, 'snapshot' => ['title' => $draft->title, 'items' => $items], 'scheduled_at' => $at, 'receipts' => []]);
+                $attributes = ['snapshot' => ['title' => $draft->title, 'items' => $items], 'scheduled_at' => $at];
+                if ($publication) {
+                    if ($data['mode'] !== 'preserve') {
+                        $attributes += ['status' => 'scheduled', 'next_attempt_at' => null, 'error' => null];
+                    }
+                    $publication->update($attributes);
+                    $result[] = $publication;
+                } else {
+                    $result[] = Publication::create(['draft_id' => $draft->id, 'account_id' => $account->id, ...$attributes, 'receipts' => []]);
+                }
+            }
+            if ($updating) {
+                foreach ($existing as $publication) {
+                    if (! in_array($publication->account_id, $ids)) {
+                        $publication->update(['status' => 'cancelled', 'next_attempt_at' => null]);
+                    }
+                }
             }
             if ($data['mode'] === 'now') {
                 foreach ($accounts as $account) {
