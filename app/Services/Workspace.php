@@ -127,8 +127,14 @@ class Workspace
                 abort_if($draft->version !== $data['version'], 409, 'This draft changed on another device. Sync and review it before deleting.');
                 $draft->delete();
             }
+            $publications = Publication::where('draft_id', $data['id'])->lockForUpdate()->get();
+            abort_if($publications->whereIn('status', ['publishing', 'uncertain'])->isNotEmpty(), 409, 'This post is publishing or needs recovery. Resolve it before deleting.');
+            foreach ($publications->whereIn('status', ['scheduled', 'retry']) as $publication) {
+                $this->cancel($publication->id);
+                $publication->status = 'cancelled';
+            }
 
-            return ['deleted' => true];
+            return ['deleted' => true, 'cancelled_publication_ids' => $publications->where('status', 'cancelled')->pluck('id')->all()];
         });
     }
 
