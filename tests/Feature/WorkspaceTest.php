@@ -24,6 +24,7 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Passport;
+use PHPUnit\Framework\Attributes\TestWith;
 use Tests\TestCase;
 
 class WorkspaceTest extends TestCase
@@ -324,6 +325,33 @@ class WorkspaceTest extends TestCase
         }
     }
 
+    #[TestWith([['detail' => 'Invalid media.'], 400, 'failed', 'Invalid media.'])]
+    #[TestWith([['errors' => [['detail' => 'Invalid segment.']]], 400, 'failed', 'Invalid segment.'])]
+    #[TestWith([['errors' => [['message' => 'Duplicate post.']]], 403, 'failed', 'Duplicate post.'])]
+    #[TestWith([['message' => 'Upload failed.'], 400, 'failed', 'Upload failed.'])]
+    #[TestWith([['title' => 'Invalid Request'], 400, 'failed', 'Invalid Request'])]
+    #[TestWith([['detail' => ['unexpected'], 'message' => 'Bad media.'], 400, 'failed', 'Bad media.'])]
+    #[TestWith([['detail' => '<b>Invalid test-secret</b>'], 401, 'failed', 'Invalid [redacted]'])]
+    #[TestWith([['detail' => 'Rate limited.'], 429, 'retry', 'Rate limited.'])]
+    #[TestWith([['detail' => 'Unavailable.'], 503, 'uncertain', 'Unavailable.'])]
+    #[TestWith(['<html>Proxy error</html>', 400, 'failed', null])]
+    public function test_x_failures_preserve_provider_details_and_recovery_state(array|string $body, int $status, string $outcome, ?string $detail): void
+    {
+        $this->freezeTime();
+        $publication = $this->scheduled($this->account());
+        Http::fake(['api.x.com/2/tweets' => Http::response($body, $status, ['Retry-After' => '120'])]);
+
+        app(Publisher::class)->publish($publication->id);
+
+        $publication->refresh();
+        $this->assertSame($outcome, $publication->status);
+        $guidance = $outcome === 'uncertain' ? 'Verify the post before retrying.' : (in_array($status, [401, 403]) ? 'Check account permissions or reconnect.' : 'Review the post and provider limits.');
+        $this->assertSame("Provider returned HTTP $status. ".$guidance.($detail === null ? '' : ' X: '.$detail), $publication->error);
+        $this->assertSame($outcome === 'retry' ? now()->addSeconds(120)->toIso8601String() : null, $publication->next_attempt_at?->toIso8601String());
+        $this->assertEmpty($publication->receipts);
+        Http::assertSentCount(1);
+    }
+
     public function test_image_uploads_reach_x_and_linkedin_without_discarding_media(): void
     {
         Storage::fake('local');
@@ -337,6 +365,7 @@ class WorkspaceTest extends TestCase
         ]);
         $this->assertSame('post1', app(SocialProviders::class)->publish($x, ['text' => 'Photo', 'media_ids' => [$m->id]], null));
         Http::assertSent(fn ($r) => $r->url() === 'https://api.x.com/2/tweets' && $r['media']['media_ids'] === ['media1']);
+        Http::assertSent(fn ($r) => $r->url() === 'https://api.x.com/2/media/upload/media1/finalize' && $r->method() === 'POST' && $r->body() === '');
         $li = $this->account('linkedin');
         Http::fake([
             'api.linkedin.com/rest/images?action=initializeUpload' => Http::response(['value' => ['image' => 'urn:li:image:123', 'uploadUrl' => 'https://www.linkedin.com/upload-test']]),

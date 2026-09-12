@@ -109,18 +109,35 @@ class SocialProviders
         return $client;
     }
 
-    public function send(Account $a, string $method, string $url, array $data = [], bool $publishes = false)
+    public function send(Account $a, string $method, string $url, ?array $data = [], bool $publishes = false)
     {
         try {
             $client = $this->client($a);
-            $response = $method === 'GET' ? $client->get($url, $data) : $client->post($url, $data);
+            $response = $data === null ? $client->send($method, $url) : ($method === 'GET' ? $client->get($url, $data) : $client->post($url, $data));
         } catch (ConnectionException $e) {
             throw new ProviderFailure($publishes ? 'The provider may have accepted the post. Verify its outcome before retrying.' : 'The provider could not be reached.', $publishes ? 'uncertain' : 'retry');
         }
         if (! $response->successful()) {
             $code = $response->status();
             $outcome = $code === 429 ? 'retry' : ($code >= 500 ? ($publishes ? 'uncertain' : 'retry') : 'failed');
-            throw new ProviderFailure("Provider returned HTTP $code. ".($outcome === 'uncertain' ? 'Verify the post before retrying.' : ($code === 401 || $code === 403 ? 'Check account permissions or reconnect.' : 'Review the post and provider limits.')), $outcome, min(86400, max(60, (int) $response->header('Retry-After'))));
+            $message = "Provider returned HTTP $code. ".($outcome === 'uncertain' ? 'Verify the post before retrying.' : ($code === 401 || $code === 403 ? 'Check account permissions or reconnect.' : 'Review the post and provider limits.'));
+            if ($a->provider === 'x') {
+                foreach (['detail', 'errors.0.detail', 'errors.0.message', 'message', 'title'] as $field) {
+                    $detail = $response->json($field);
+                    if (! is_string($detail) || trim($detail) === '') {
+                        continue;
+                    }
+                    foreach (['access_token', 'refresh_token'] as $credential) {
+                        $secret = $a->credentials[$credential] ?? null;
+                        if (is_string($secret) && $secret !== '') {
+                            $detail = str_replace($secret, '[redacted]', $detail);
+                        }
+                    }
+                    $message .= ' X: '.mb_substr(trim(strip_tags($detail)), 0, 500);
+                    break;
+                }
+            }
+            throw new ProviderFailure($message, $outcome, min(86400, max(60, (int) $response->header('Retry-After'))));
         }
 
         return $response;
@@ -178,7 +195,7 @@ class SocialProviders
             } finally {
                 fclose($stream);
             }
-            $final = $this->send($a, 'POST', "https://api.x.com/2/media/upload/$id/finalize");
+            $final = $this->send($a, 'POST', "https://api.x.com/2/media/upload/$id/finalize", null);
             $info = $final->json('data.processing_info');
             for ($i = 0; $info && in_array($info['state'], ['pending', 'in_progress']) && $i < 12; $i++) {
                 sleep(min(5, max(1, $info['check_after_secs'] ?? 1)));
