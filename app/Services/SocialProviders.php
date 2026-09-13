@@ -331,6 +331,77 @@ class SocialProviders
         return $this->requiredId($this->send($a, 'POST', 'https://api.linkedin.com/rest/posts', $payload, true)->header('x-restli-id'), true);
     }
 
+    public function recoveryId(Publication $publication, string $input): string
+    {
+        $input = trim($input);
+        if (preg_match('~<iframe\b[^>]*\bsrc\s*=\s*(["\'])(.*?)\1~is', $input, $embed)) {
+            $input = html_entity_decode($embed[2], ENT_QUOTES | ENT_HTML5);
+        }
+        if (! str_contains($input, '://') || str_starts_with($input, 'at://')) {
+            return $input;
+        }
+        $account = $publication->account;
+        $url = parse_url($input);
+        if (! $account || ! $url || ($url['scheme'] ?? '') !== 'https' || isset($url['user']) || isset($url['pass']) || isset($url['port'])) {
+            throw new ProviderFailure('Paste the full HTTPS link copied from the published post.');
+        }
+        $host = strtolower($url['host'] ?? '');
+        $path = rawurldecode($url['path'] ?? '');
+        if ($account->provider === 'x' && in_array($host, ['x.com', 'www.x.com', 'twitter.com', 'www.twitter.com']) && preg_match('~^/(?:[^/]+|i/web)/status/(\d+)/?$~', $path, $match)) {
+            return $match[1];
+        }
+        if (str_starts_with($account->provider, 'linkedin') && in_array($host, ['linkedin.com', 'www.linkedin.com'])) {
+            if (preg_match('~^/(?:embed/)?feed/update/(urn:li:(?:share|ugcPost):\d+)/?$~', $path, $match)) {
+                return $match[1];
+            }
+            throw new ProviderFailure('On LinkedIn, choose Embed this post and paste the copied embed code or its URL here. LinkedIn’s API cannot resolve an activity or shortened link.');
+        }
+        if ($account->provider === 'facebook' && in_array($host, ['facebook.com', 'www.facebook.com', 'm.facebook.com'])) {
+            parse_str($url['query'] ?? '', $query);
+            if (preg_match('~^/[^/]+/posts/(\d+)/?$~', $path, $match)) {
+                return $account->provider_id.'_'.$match[1];
+            }
+            if ($path === '/permalink.php' && is_string($query['story_fbid'] ?? null) && ctype_digit($query['story_fbid']) && ($query['id'] ?? '') === $account->provider_id) {
+                return $account->provider_id.'_'.$query['story_fbid'];
+            }
+            if (preg_match('~^/(\d+(?:_\d+)?)/?$~', $path, $match)) {
+                return $match[1];
+            }
+        }
+        if ($account->provider === 'bluesky' && $host === 'bsky.app' && preg_match('~^/profile/([^/]+)/post/([A-Za-z0-9._:-]+)/?$~', $path, $match)) {
+            $actor = $match[1];
+            if (! str_starts_with($actor, 'did:')) {
+                $actor = Http::acceptJson()->connectTimeout(3)->timeout(10)->withoutRedirecting()
+                    ->get('https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle', ['handle' => $actor])->throw()->json('did');
+            }
+            if ($actor === $account->provider_id) {
+                return 'at://'.$actor.'/app.bsky.feed.post/'.$match[2];
+            }
+            throw new ProviderFailure('This Bluesky link belongs to another account.');
+        }
+        if ($account->provider === 'threads' && in_array($host, ['threads.net', 'www.threads.net', 'threads.com', 'www.threads.com']) && preg_match('~^/@[^/]+/post/([A-Za-z0-9_-]+)/?$~', $path, $match)) {
+            // ponytail: search up to 500 posts and 500 replies; older recoveries can use the provider ID.
+            foreach (['threads', 'replies'] as $edge) {
+                $query = ['fields' => 'id,shortcode', 'limit' => 100];
+                for ($page = 0; $page < 5; $page++) {
+                    $data = $this->send($account, 'GET', 'https://graph.threads.net/v1.0/me/'.$edge, $query)->json();
+                    foreach ($data['data'] ?? [] as $post) {
+                        if (($post['shortcode'] ?? null) === $match[1] && is_string($post['id'] ?? null)) {
+                            return $post['id'];
+                        }
+                    }
+                    $after = $data['paging']['cursors']['after'] ?? null;
+                    if (! is_string($after) || empty($data['paging']['next'])) {
+                        break;
+                    }
+                    $query['after'] = $after;
+                }
+            }
+            throw new ProviderFailure('This link was not found in this account’s recent Threads posts or replies. Check the account and link, or enter the provider post ID for an older post.');
+        }
+        throw new ProviderFailure('Use a direct post link for this destination, not a profile or shortened link.');
+    }
+
     public function verify(Publication $p, string $id): void
     {
         $a = $p->account;

@@ -212,8 +212,16 @@ class Workspace
             }
             $existing = Publication::where('draft_id', $draft->id)->where('status', '!=', 'cancelled')->orderBy('id')->lockForUpdate()->get();
             $updating = $data['update'] ?? false;
+            if ($updating) {
+                $fixedAccounts = $existing->whereIn('status', ['published', 'failed', 'missed'])->pluck('account_id');
+                $accounts = $accounts->reject(fn ($account) => $fixedAccounts->contains($account->id));
+                $existing = $existing->reject(fn ($publication) => in_array($publication->status, ['published', 'failed', 'missed']));
+            }
             if ($updating && ($existing->isEmpty() || $existing->contains(fn ($publication) => ! in_array($publication->status, ['scheduled', 'retry']) || ! empty($publication->receipts)))) {
                 $this->invalid('status', 'This post can no longer be updated because publishing has started or its schedule is no longer active.');
+            }
+            if (! $updating && $existing->contains('status', 'published') && $existing->whereIn('status', ['failed', 'missed'])->isNotEmpty()) {
+                $this->invalid('draft', 'Recover unfinished destinations individually before scheduling this post again.');
             }
             if (! $updating && $existing->contains(fn ($publication) => in_array($publication->status, ['scheduled', 'retry', 'publishing', 'uncertain']))) {
                 $this->invalid('draft', 'Cancel existing pending publications before scheduling again.');
@@ -327,7 +335,7 @@ class Workspace
 
     public function recover(array $data): Publication
     {
-        $data = Validator::make($data, ['id' => ['required', 'uuid', Rule::exists('publications', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())], 'action' => 'required|in:confirmed,not_published,reschedule', 'post_id' => 'required_if:action,confirmed|string|max:200', 'scheduled_at' => 'required_unless:action,confirmed|date|after:now'])->validate();
+        $data = Validator::make($data, ['id' => ['required', 'uuid', Rule::exists('publications', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())], 'action' => 'required|in:confirmed,not_published,reschedule', 'post_id' => 'required_if:action,confirmed|string|max:2048', 'scheduled_at' => 'required_unless:action,confirmed|date|after:now'])->validate();
 
         return DB::transaction(function () use ($data) {
             User::lockForUpdate()->findOrFail(app(WorkspaceOwner::class)->requireId());
@@ -336,6 +344,7 @@ class Workspace
                 if ($p->status !== 'uncertain') {
                     $this->invalid('status', 'Only uncertain publications need confirmation.');
                 }
+                $data['post_id'] = app(SocialProviders::class)->recoveryId($p, $data['post_id']);
                 app(SocialProviders::class)->verify($p, $data['post_id']);
                 $receipts = $p->receipts ?? [];
                 if (in_array($data['post_id'], $receipts)) {

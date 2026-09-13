@@ -12,6 +12,7 @@ use App\Models\Media;
 use App\Models\Publication;
 use App\Models\User;
 use App\Services\Attachments;
+use App\Services\ProviderFailure;
 use App\Services\Publisher;
 use App\Services\SocialProviders;
 use App\Services\Workspace;
@@ -506,5 +507,117 @@ class WorkspaceTest extends TestCase
         $this->assertSame('urn:li:share:789', app(SocialProviders::class)->publish($a, ['text' => 'A video', 'media_ids' => [$m->id]], null));
         Http::assertSent(fn ($r) => str_contains($r->url(), 'finalizeUpload') && $r['finalizeUploadRequest']['uploadedPartIds'] === ['part1']);
         Http::assertSent(fn ($r) => $r->url() === 'https://api.linkedin.com/rest/posts' && $r['content']['media']['id'] === 'urn:li:video:123');
+    }
+
+    public function test_partial_publication_updates_only_queued_destinations(): void
+    {
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        $live = $this->account('x');
+        $queued = $this->account('threads');
+        $failed = $this->account('bluesky');
+        $draft = $this->draft($live);
+        $draft->update(['content' => [...$draft->content, 'account_ids' => [$live->id, $queued->id, $failed->id]]]);
+        $posts = collect(app(Workspace::class)->schedule(['draft_id' => $draft->id, 'version' => 1, 'mode' => 'exact', 'scheduled_at' => now()->addDay()->toIso8601String()]));
+        $livePost = $posts->firstWhere('account_id', $live->id);
+        $failedPost = $posts->firstWhere('account_id', $failed->id);
+        $queuedPost = $posts->firstWhere('account_id', $queued->id);
+        $livePost->update(['status' => 'published', 'receipts' => ['123']]);
+        $failedPost->update(['status' => 'failed']);
+        $originalLive = $livePost->fresh()->getAttributes();
+        $originalFailed = $failedPost->fresh()->getAttributes();
+        $draft->update(['content' => [...$draft->content, 'items' => [['text' => 'New queued text', 'media_ids' => []]]]]);
+        $live->update(['status' => 'expired']);
+
+        $this->postJson('/api/schedule', ['draft_id' => $draft->id, 'version' => 1, 'mode' => 'preserve', 'update' => true])->assertOk();
+
+        $this->assertSame('New queued text', $queuedPost->fresh()->snapshot['items'][0]['text']);
+        $this->assertSame($originalLive, $livePost->fresh()->getAttributes());
+        $this->assertSame($originalFailed, $failedPost->fresh()->getAttributes());
+        $queuedPost->update(['status' => 'failed']);
+        $this->postJson('/api/schedule', ['draft_id' => $draft->id, 'version' => 1, 'mode' => 'now'])->assertUnprocessable()->assertJsonValidationErrors('draft');
+        $this->assertSame($originalLive, $livePost->fresh()->getAttributes());
+        $this->assertDatabaseCount('publications', 3);
+    }
+
+    #[TestWith(['https://x.com/account/status/222?s=20', '222'])]
+    #[TestWith(['https://twitter.com/i/web/status/222', '222'])]
+    public function test_recovery_verifies_links_and_records_the_canonical_id(string $link, string $id): void
+    {
+        Passport::actingAs(User::factory()->create(), ['mcp:use']);
+        $account = $this->account();
+        $post = $this->scheduled($account);
+        $post->update(['status' => 'uncertain']);
+        Http::fake(['api.x.com/2/tweets/222*' => Http::response(['data' => ['author_id' => $account->provider_id, 'text' => 'Hello world']])]);
+
+        $this->postJson('/api/recover', ['id' => $post->id, 'action' => 'confirmed', 'post_id' => $link])->assertOk();
+
+        $this->assertSame([$id], $post->fresh()->receipts);
+        $this->assertSame('published', $post->fresh()->status);
+        Http::assertSentCount(1);
+    }
+
+    #[TestWith(['https://x.com.evil.test/account/status/222'])]
+    #[TestWith(['https://user@x.com/account/status/222'])]
+    #[TestWith(['https://x.com:444/account/status/222'])]
+    #[TestWith(['https://bsky.app/profile/other/post/222'])]
+    public function test_recovery_rejects_wrong_hosts_before_contacting_providers(string $link): void
+    {
+        $post = $this->scheduled($this->account());
+        $post->update(['status' => 'uncertain']);
+        try {
+            app(Workspace::class)->recover(['id' => $post->id, 'action' => 'confirmed', 'post_id' => $link]);
+            $this->fail('Invalid link accepted');
+        } catch (ProviderFailure $e) {
+            $this->assertNotEmpty($e->getMessage());
+        }
+        Http::assertNothingSent();
+        $this->assertSame([], $post->fresh()->receipts);
+        $this->assertSame('uncertain', $post->fresh()->status);
+    }
+
+    #[TestWith(['facebook', 'https://www.facebook.com/page/posts/222', '123_222'])]
+    #[TestWith(['facebook', 'https://www.facebook.com/permalink.php?story_fbid=222&id=123', '123_222'])]
+    #[TestWith(['linkedin', 'https://www.linkedin.com/feed/update/urn%3Ali%3Ashare%3A222/', 'urn:li:share:222'])]
+    #[TestWith(['linkedin_page', 'https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:222', 'urn:li:ugcPost:222'])]
+    #[TestWith(['linkedin', '<iframe src="https://www.linkedin.com/embed/feed/update/urn:li:share:222" title="Post"></iframe>', 'urn:li:share:222'])]
+    #[TestWith(['bluesky', 'https://bsky.app/profile/did:plc:example/post/abc', 'at://did:plc:example/app.bsky.feed.post/abc'])]
+    public function test_provider_links_resolve_without_fetching_untrusted_urls(string $provider, string $link, string $expected): void
+    {
+        $account = $this->account($provider);
+        $account->update(['provider_id' => $provider === 'bluesky' ? 'did:plc:example' : '123']);
+        $post = $this->scheduled($account);
+
+        $this->assertSame($expected, app(SocialProviders::class)->recoveryId($post, $link));
+        Http::assertNothingSent();
+    }
+
+    public function test_bluesky_handle_links_must_resolve_to_the_publication_account(): void
+    {
+        $account = $this->account('bluesky');
+        $account->update(['provider_id' => 'did:plc:example']);
+        $post = $this->scheduled($account);
+        Http::fake(['public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle*' => Http::sequence()->push(['did' => 'did:plc:example'])->push(['did' => 'did:plc:other'])]);
+        $link = 'https://bsky.app/profile/example.bsky.social/post/abc';
+        $this->assertSame('at://did:plc:example/app.bsky.feed.post/abc', app(SocialProviders::class)->recoveryId($post, $link));
+        $this->expectException(ProviderFailure::class);
+        app(SocialProviders::class)->recoveryId($post, $link);
+    }
+
+    public function test_threads_links_search_replies_and_verify_before_recording(): void
+    {
+        $account = $this->account('threads');
+        $post = $this->scheduled($account);
+        $post->update(['status' => 'uncertain']);
+        Http::fake([
+            'graph.threads.net/v1.0/me/threads*' => Http::response(['data' => []]),
+            'graph.threads.net/v1.0/me/replies*' => Http::response(['data' => [['id' => '222', 'shortcode' => 'Ab_C']]]),
+            'graph.threads.net/v1.0/222*' => Http::response(['owner' => ['id' => $account->provider_id], 'text' => 'Hello world']),
+        ]);
+
+        app(Workspace::class)->recover(['id' => $post->id, 'action' => 'confirmed', 'post_id' => 'https://www.threads.com/@example/post/Ab_C']);
+
+        $this->assertSame(['222'], $post->fresh()->receipts);
+        $this->assertSame('published', $post->fresh()->status);
+        Http::assertSentCount(3);
     }
 }
