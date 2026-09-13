@@ -23,7 +23,7 @@ Sendae connects **Pages**, not personal profiles. The Facebook user must be able
 5. Create or use a Facebook Page. In Development mode only people with an app role (Admin / Developer / Tester) can complete OAuth; add them under App Roles.
 6. App Review is required before customers who are not testers can grant Page permissions.
 
-Permissions Sendae requests: `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`.
+Permissions Sendae requests: `pages_show_list`, `pages_read_engagement`, `pages_read_user_content`, `pages_manage_posts`. The user-content permission is required for reaction and comment totals on the user's Page posts.
 
 If the chooser is empty, the user has no eligible Page, or the Page role cannot create content.
 

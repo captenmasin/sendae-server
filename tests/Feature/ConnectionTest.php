@@ -85,7 +85,7 @@ class ConnectionTest extends TestCase
 
         parse_str(parse_url($response->headers->get('Location'), PHP_URL_QUERY), $parameters);
         $this->assertSame('www.facebook.com', parse_url($response->headers->get('Location'), PHP_URL_HOST));
-        $this->assertEqualsCanonicalizing(['pages_show_list', 'pages_read_engagement', 'pages_manage_posts'], explode(',', $parameters['scope']));
+        $this->assertEqualsCanonicalizing(['pages_show_list', 'pages_read_engagement', 'pages_read_user_content', 'pages_manage_posts'], explode(',', $parameters['scope']));
     }
 
     public function test_expired_connection_ticket_returns_403(): void
