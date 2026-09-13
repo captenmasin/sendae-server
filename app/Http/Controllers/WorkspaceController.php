@@ -54,6 +54,11 @@ class WorkspaceController extends Controller
         return $w->schedule($r->all());
     }
 
+    public function schedulePreview(Request $request, Workspace $workspace): array
+    {
+        return $workspace->previewSchedule($request->all());
+    }
+
     public function cancel(Request $r, Workspace $w)
     {
         $r->validate(['id' => 'required|uuid', 'separate' => 'sometimes|boolean']);

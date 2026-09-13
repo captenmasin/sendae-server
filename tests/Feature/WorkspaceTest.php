@@ -265,6 +265,38 @@ class WorkspaceTest extends TestCase
         $this->travelBack();
     }
 
+    public function test_schedule_preview_returns_the_next_available_slot_without_creating_a_publication(): void
+    {
+        $this->travelTo(now()->setDate(2026, 10, 24)->setTime(12, 0));
+        Passport::actingAs(auth()->user(), ['mcp:use']);
+        $account = $this->account();
+        $draft = $this->draft($account);
+
+        $this->postJson('/api/schedulePreview', ['draft_id' => $draft->id, 'version' => 1])
+            ->assertOk()
+            ->assertJsonPath('0.account_id', $account->id)
+            ->assertJsonPath('0.name', 'Test account')
+            ->assertJsonPath('0.timezone', 'Europe/London')
+            ->assertJsonPath('0.scheduled_at', '2026-10-26T09:00:00+00:00');
+
+        $this->assertDatabaseCount('publications', 0);
+        $this->travelBack();
+    }
+
+    public function test_schedule_preview_rejects_an_account_without_posting_slots(): void
+    {
+        Passport::actingAs(auth()->user(), ['mcp:use']);
+        $account = $this->account();
+        $account->update(['slots' => []]);
+        $draft = $this->draft($account);
+
+        $this->postJson('/api/schedulePreview', ['draft_id' => $draft->id, 'version' => 1])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('slots');
+
+        $this->assertDatabaseCount('publications', 0);
+    }
+
     public function test_nonexistent_spring_slot_is_skipped(): void
     {
         $this->travelTo(now()->setDate(2027, 3, 27)->setTime(12, 0));

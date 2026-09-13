@@ -268,6 +268,37 @@ class Workspace
         });
     }
 
+    public function previewSchedule(array $data): array
+    {
+        $data = Validator::make($data, [
+            'draft_id' => ['required', 'uuid', Rule::exists('drafts', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())],
+            'version' => ['required', 'integer'],
+        ])->validate();
+        $draft = Draft::findOrFail($data['draft_id']);
+        if ($draft->version !== $data['version']) {
+            $this->invalid('version', 'This draft changed. Reload before scheduling.');
+        }
+        $ids = $draft->content['account_ids'];
+        $accounts = Account::whereIn('id', $ids)->orderBy('id')->get();
+        if (! $ids || $accounts->count() !== count($ids)) {
+            $this->invalid('accounts', 'Select connected destination accounts.');
+        }
+
+        return $accounts->map(function (Account $account) use ($draft): array {
+            if ($account->status !== 'connected') {
+                $this->invalid('account', "{$account->name} needs reconnecting or approval.");
+            }
+            $this->items($draft, $account);
+
+            return [
+                'account_id' => $account->id,
+                'name' => $account->name,
+                'timezone' => $account->timezone,
+                'scheduled_at' => $this->nextSlot($account)->toIso8601String(),
+            ];
+        })->all();
+    }
+
     public function nextSlot(Account $account): CarbonImmutable
     {
         $now = CarbonImmutable::now($account->timezone);
