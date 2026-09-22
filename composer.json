@@ -24,7 +24,8 @@
         "laravel/pint": "^1.27",
         "mockery/mockery": "^1.6",
         "nunomaduro/collision": "^8.6",
-        "phpunit/phpunit": "^12.5.12"
+        "pestphp/pest": "5.*",
+        "pestphp/pest-plugin-laravel": "^v5.0.0"
     },
     "autoload": {
         "psr-4": {
@@ -53,6 +54,8 @@
             "@php artisan config:clear --ansi @no_additional_args",
             "@php artisan test"
         ],
+        "pint": "vendor/bin/pint",
+        "pint:test": "vendor/bin/pint --test",
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
             "@php artisan package:discover --ansi"

@@ -1,14 +1,14 @@
 <?php
 
-use App\Http\Middleware\LocalOrOwner;
+use Illuminate\Http\Request;
 use App\Services\ProviderFailure;
-use Illuminate\Auth\AuthenticationException;
+use App\Http\Middleware\LocalOrOwner;
 use Illuminate\Foundation\Application;
+use Illuminate\Auth\AuthenticationException;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Http\Client\RequestException;
-use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 

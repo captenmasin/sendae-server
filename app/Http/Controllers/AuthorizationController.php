@@ -2,17 +2,17 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
+use Illuminate\Http\Request;
 use Laravel\Passport\Bridge\User;
+use Illuminate\Support\Facades\Cache;
 use Laravel\Passport\ClientRepository;
-use Laravel\Passport\Http\Controllers\HandlesOAuthErrors;
-use League\OAuth2\Server\AuthorizationServer;
-use League\OAuth2\Server\Exception\OAuthServerException;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use League\OAuth2\Server\AuthorizationServer;
 use Symfony\Component\HttpFoundation\Response;
+use League\OAuth2\Server\Exception\OAuthServerException;
+use Laravel\Passport\Http\Controllers\HandlesOAuthErrors;
 
 class AuthorizationController extends Controller
 {
@@ -24,7 +24,9 @@ class AuthorizationController extends Controller
         $ticket = Str::random(64);
         Cache::put('authorization:'.$ticket, ['request' => serialize($authorization), 'user_id' => null], now()->addMinutes(10));
 
-        return response('', 302, ['Location' => 'sendae://authorize?ticket='.$ticket, 'Cache-Control' => 'no-store']);
+        return response()
+            ->view('oauth.open', ['url' => 'sendae://authorize?ticket='.$ticket])
+            ->header('Cache-Control', 'no-store');
     }
 
     public function show(Request $request, string $ticket, ClientRepository $clients): array

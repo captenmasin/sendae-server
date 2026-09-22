@@ -4,8 +4,8 @@ namespace App\Services;
 
 use App\Models\User;
 use App\Models\Workspace;
-use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Auth\AuthenticationException;
 
 class WorkspaceOwner
 {

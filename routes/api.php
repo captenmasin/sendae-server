@@ -1,15 +1,15 @@
 <?php
 
-use App\Http\Controllers\AuthorizationController;
-use App\Http\Controllers\ConnectionController;
-use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\RegistrationController;
-use App\Http\Controllers\SessionController;
-use App\Http\Controllers\WorkspaceController as W;
-use App\Http\Controllers\WorkspacesController;
 use App\Http\Middleware\LocalOrOwner;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\SessionController;
+use App\Http\Controllers\ConnectionController;
+use App\Http\Controllers\WorkspacesController;
+use App\Http\Controllers\RegistrationController;
 use Laravel\Passport\Http\Middleware\CheckToken;
+use App\Http\Controllers\AuthorizationController;
+use App\Http\Controllers\WorkspaceController as W;
 
 Route::post('/register', [RegistrationController::class, 'store'])->middleware('throttle:signup');
 Route::post('/forgot-password', [RegistrationController::class, 'forgot'])->middleware('throttle:recovery');

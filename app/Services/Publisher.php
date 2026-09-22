@@ -2,11 +2,11 @@
 
 namespace App\Services;
 
-use App\Jobs\PublishAccount;
 use App\Models\Account;
 use App\Models\Publication;
-use Illuminate\Support\Facades\Cache;
+use App\Jobs\PublishAccount;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 
 class Publisher
 {

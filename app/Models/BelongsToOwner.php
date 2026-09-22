@@ -3,8 +3,8 @@
 namespace App\Models;
 
 use App\Services\WorkspaceOwner;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
 
 trait BelongsToOwner
 {

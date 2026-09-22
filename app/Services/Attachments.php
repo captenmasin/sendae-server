@@ -2,13 +2,13 @@
 
 namespace App\Services;
 
-use App\Models\Media;
 use App\Models\User;
+use App\Models\Media;
+use Illuminate\Support\Str;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Str;
 
 class Attachments
 {

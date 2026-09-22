@@ -1,11 +1,11 @@
 <?php
 
-use App\Http\Controllers\AuthorizationController;
-use App\Http\Controllers\ConnectionController;
-use App\Http\Controllers\WorkspaceController;
-use App\Http\Middleware\LocalOrOwner;
 use Illuminate\Http\Request;
+use App\Http\Middleware\LocalOrOwner;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\WorkspaceController;
+use App\Http\Controllers\ConnectionController;
+use App\Http\Controllers\AuthorizationController;
 use Laravel\Passport\Http\Controllers\AccessTokenController;
 
 Route::get('/up', fn () => response()->json(['status' => 'ok']));

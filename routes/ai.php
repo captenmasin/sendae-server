@@ -1,8 +1,8 @@
 <?php
 
-use App\Http\Middleware\LocalOrOwner;
-use App\Mcp\Servers\SendaeServer;
 use Laravel\Mcp\Facades\Mcp;
+use App\Mcp\Servers\SendaeServer;
+use App\Http\Middleware\LocalOrOwner;
 use Laravel\Passport\Http\Middleware\CheckToken;
 
 Mcp::oauthRoutes();

@@ -3,9 +3,9 @@
 namespace App\Jobs;
 
 use App\Services\Publisher;
-use Illuminate\Contracts\Queue\ShouldBeUnique;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 
 class PublishAccount implements ShouldBeUnique, ShouldQueue
 {

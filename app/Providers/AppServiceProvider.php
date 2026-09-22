@@ -2,13 +2,20 @@
 
 namespace App\Providers;
 
-use App\Services\WorkspaceOwner;
-use Illuminate\Cache\RateLimiting\Limit;
+use DateInterval;
+use SplObjectStorage;
+use ReflectionProperty;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Facades\URL;
-use Illuminate\Support\ServiceProvider;
 use Laravel\Passport\Passport;
+use App\Services\WorkspaceOwner;
+use Illuminate\Support\Facades\URL;
+use App\OAuth\LoopbackAuthCodeGrant;
+use Illuminate\Support\ServiceProvider;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Support\Facades\RateLimiter;
+use League\OAuth2\Server\AuthorizationServer;
+use Laravel\Passport\Bridge\AuthCodeRepository;
+use Laravel\Passport\Bridge\RefreshTokenRepository;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -33,5 +40,27 @@ class AppServiceProvider extends ServiceProvider
         }
         Passport::personalAccessTokensExpireIn(now()->addMonths(6));
         Passport::tokensCan(['mcp:use' => 'Manage Sendae drafts, media, scheduling and publishing']);
+        $installed = new SplObjectStorage;
+        $this->app->afterResolving(AuthorizationServer::class, function (AuthorizationServer $server) use ($installed): void {
+            if ($installed->contains($server) || ! $this->usesAuthCodeGrant($server)) {
+                return;
+            }
+
+            $installed->attach($server);
+            $grant = new LoopbackAuthCodeGrant(
+                $this->app->make(AuthCodeRepository::class),
+                $this->app->make(RefreshTokenRepository::class),
+                new DateInterval('PT10M'),
+            );
+            $grant->setRefreshTokenTTL(Passport::refreshTokensExpireIn());
+            $server->enableGrantType($grant, Passport::tokensExpireIn());
+        });
+    }
+
+    private function usesAuthCodeGrant(AuthorizationServer $server): bool
+    {
+        $grants = new ReflectionProperty($server, 'enabledGrantTypes')->getValue($server);
+
+        return isset($grants['authorization_code']);
     }
 }

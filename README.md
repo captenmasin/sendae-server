@@ -26,7 +26,7 @@ php artisan schedule:work
 php artisan queue:work --sleep=3 --tries=1 --timeout=840
 ```
 
-The sibling Sendae desktop defaults to this service on port 8001. Users create and verify their own account, then sign in with email and password; they never select a publishing server or paste API tokens. Sendae owns every screen, including password reset, social-account selection and MCP consent. The server serves JSON APIs and bodyless OAuth/email redirects to `sendae://` links; it has no browser application or HTML views.
+The sibling Sendae desktop defaults to this service on port 8001. Users create an account and sign in with email and password; they never select a publishing server or paste API tokens. Sendae owns login, password reset, social-account selection and MCP approval. The server serves JSON APIs. Its only HTML page is `/oauth/authorize`, which opens `sendae://` so the desktop app can approve the connection.
 
 ## Validate
 

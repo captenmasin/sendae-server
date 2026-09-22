@@ -2,16 +2,16 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Account;
 use App\Models\User;
+use App\Models\Account;
 use App\Services\Bluesky;
-use App\Services\WorkspaceOwner;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use App\Services\WorkspaceOwner;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
 
 class ConnectionController extends Controller
 {
