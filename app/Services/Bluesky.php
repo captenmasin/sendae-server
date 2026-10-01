@@ -58,8 +58,8 @@ class Bluesky
                 throw new ProviderFailure('Reconnect your Bluesky account before publishing.');
             }
             if (empty($credentials['expires_at']) || CarbonImmutable::parse($credentials['expires_at'])->subMinutes(5)->isPast()) {
-                $response = $this->http()->withToken($credentials['refresh_token'])->post(self::Base.'com.atproto.server.refreshSession');
-                if (in_array($response->status(), [400, 401, 403])) {
+                $response = $this->http()->withToken($credentials['refresh_token'])->send('POST', self::Base.'com.atproto.server.refreshSession');
+                if (in_array($response->status(), [401, 403]) || ($response->status() === 400 && in_array($response->json('error'), ['ExpiredToken', 'InvalidToken']))) {
                     $account->update(['status' => 'expired']);
                     throw new ProviderFailure('Bluesky authorization expired. Reconnect it in Accounts.');
                 }

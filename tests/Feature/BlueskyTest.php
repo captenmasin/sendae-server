@@ -144,7 +144,7 @@ test('expired access token is refreshed before publishing', function (): void {
 
     $this->assertSame('published', $publication->fresh()->status);
     $this->assertSame(blueskySession()['accessJwt'], $account->fresh()->credentials['access_token']);
-    Http::assertSent(fn ($request) => str_ends_with($request->url(), 'refreshSession') && $request->hasHeader('Authorization', 'Bearer refresh-secret'));
+    Http::assertSent(fn ($request) => str_ends_with($request->url(), 'refreshSession') && $request->hasHeader('Authorization', 'Bearer refresh-secret') && $request->body() === '');
     Http::assertSent(fn ($request) => str_ends_with($request->url(), 'createRecord') && $request->hasHeader('Authorization', 'Bearer '.blueskySession()['accessJwt']));
 });
 
@@ -176,18 +176,25 @@ test('connection loss during publication is uncertain', function (): void {
     $this->assertSame([], $publication->fresh()->receipts);
 });
 
-test('revoked refresh token requires reconnection without publishing', function (): void {
+test('refresh failures expire only rejected authorization without publishing', function (int $status, string $error, string $accountStatus): void {
+    $this->freezeTime();
     $account = blueskyAccount();
     $account->update(['credentials' => [...$account->credentials, 'expires_at' => now()->subMinute()->toIso8601String()]]);
     $publication = blueskyPublication($account, [['text' => 'Hello', 'media_ids' => []]]);
-    Http::fake([BlueskyTestBase.'com.atproto.server.refreshSession' => Http::response([], 401)]);
+    Http::fake([BlueskyTestBase.'com.atproto.server.refreshSession' => Http::response(['error' => $error], $status)]);
 
     app(Publisher::class)->publish($publication->id);
 
     $this->assertSame('failed', $publication->fresh()->status);
-    $this->assertSame('expired', $account->fresh()->status);
+    $this->assertSame($accountStatus, $account->fresh()->status);
     Http::assertSentCount(1);
-});
+})->with([
+    'expired token' => [400, 'ExpiredToken', 'expired'],
+    'invalid token' => [400, 'InvalidToken', 'expired'],
+    'unauthorized' => [401, 'AuthenticationRequired', 'expired'],
+    'forbidden' => [403, 'AccountTakedown', 'expired'],
+    'invalid request' => [400, 'InvalidRequest', 'connected'],
+]);
 
 test('recovery verifies the account and text and loads metrics', function (): void {
     $account = blueskyAccount();
