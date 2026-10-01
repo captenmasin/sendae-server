@@ -76,6 +76,19 @@ test('expired connection ticket returns 403', function (): void {
     $this->get('/connections/'.str_repeat('a', 64))->assertForbidden();
 });
 
+test('connection links allow 120 requests per minute before returning 429', function (): void {
+    $this->freezeTime();
+    $path = '/connections/'.str_repeat('a', 64);
+
+    for ($attempt = 0; $attempt < 120; $attempt++) {
+        $this->getJson($path)->assertForbidden();
+    }
+
+    $this->getJson($path)->assertTooManyRequests();
+    $this->travel(61)->seconds();
+    $this->getJson($path)->assertForbidden();
+});
+
 test('linkedin connections use their own app and scopes', function (string $provider, string $clientId, string $scope): void {
     config(['sendae.providers.linkedin_page.approved' => true]);
     Passport::actingAs(User::factory()->create(), ['mcp:use']);
