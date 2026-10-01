@@ -45,7 +45,7 @@ test('invalid signup is rejected and verification endpoints are removed', functi
 test('reset link is private single use and revokes existing sessions', function (): void {
     tokens();
     Notification::fake();
-    $user = User::factory()->create();
+    $user = User::factory()->create(['has_password' => false]);
     $user->createToken('Old desktop', ['mcp:use']);
     $known = $this->postJson('/api/forgot-password', ['email' => $user->email])->assertOk()->json();
     $this->postJson('/api/forgot-password', ['email' => 'missing@example.com'])->assertOk()->assertExactJson($known);
@@ -61,6 +61,7 @@ test('reset link is private single use and revokes existing sessions', function 
     $this->assertSame($user->password, $user->fresh()->password);
     $this->postJson('/api/reset-password', $data)->assertOk()->assertJsonPath('message', 'Password updated. Sign in with your new password.');
     $this->assertTrue(Hash::check($data['password'], $user->fresh()->password));
+    $this->assertTrue($user->fresh()->has_password);
     $this->assertDatabaseHas('oauth_access_tokens', ['user_id' => $user->id, 'revoked' => true]);
     $this->postJson('/api/reset-password', $data)->assertUnprocessable()->assertJsonValidationErrors('email');
 });

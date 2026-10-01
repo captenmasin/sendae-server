@@ -60,3 +60,13 @@ test('profile updates are validated and stay on the signed in account', function
     $this->patchJson('/api/profile', ['name' => 'Person', 'email' => 'person@example.com'])->assertUnauthorized();
     $this->assertDatabaseHas('users', ['id' => $user->id, 'email' => 'person@example.com']);
 });
+
+test('social accounts cannot bypass password verification through profile updates', function (): void {
+    $user = User::factory()->create(['has_password' => false]);
+    Passport::actingAs($user, ['mcp:use']);
+
+    $this->patchJson('/api/profile', ['name' => $user->name, 'email' => $user->email, 'password' => 'new-secret', 'password_confirmation' => 'new-secret'])
+        ->assertUnprocessable()->assertJsonValidationErrors('current_password');
+    $this->assertFalse($user->fresh()->has_password);
+    $this->assertFalse(Hash::check('new-secret', $user->fresh()->password));
+});

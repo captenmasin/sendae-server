@@ -38,6 +38,7 @@ class User extends Authenticatable implements OAuthenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'has_password' => 'boolean',
         ];
     }
 }

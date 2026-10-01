@@ -25,9 +25,10 @@ class ProfileController extends Controller
         $user->fill(['name' => $data['name'], 'email' => $data['email']]);
         if (! empty($data['password'])) {
             $user->password = $data['password'];
+            $user->has_password = true;
         }
         $user->save();
 
-        return response()->json(['name' => $user->name, 'email' => $user->email]);
+        return response()->json(['name' => $user->name, 'email' => $user->email, 'has_password' => $user->has_password]);
     }
 }

@@ -58,7 +58,7 @@ class RegistrationController extends Controller
         $data = $request->validate(['token' => 'required|string', 'email' => 'required|email|max:255', 'password' => $this->passwordRules()]);
         $status = Password::reset($data, function (User $user, string $password) {
             DB::transaction(function () use ($user, $password) {
-                $user->forceFill(['password' => $password, 'remember_token' => Str::random(60)])->save();
+                $user->forceFill(['password' => $password, 'remember_token' => Str::random(60), 'has_password' => true])->save();
                 DB::table('oauth_refresh_tokens')->whereIn('access_token_id', $user->tokens()->select('id'))->update(['revoked' => true]);
                 $user->tokens()->update(['revoked' => true]);
                 DB::table('sessions')->where('user_id', $user->id)->delete();

@@ -76,6 +76,7 @@ class SocialLoginTest extends TestCase
         $user = User::firstOrFail();
         $this->assertSame('person@example.com', $user->email);
         $this->assertSame($user->workspace_id, $session['workspace_id']);
+        $this->assertFalse(User::firstOrFail()->has_password);
         $this->assertDatabaseHas('login_identities', ['user_id' => $user->id, 'provider' => $provider, 'provider_id' => 'person-123']);
         $this->withToken($session['token'])->getJson('/api/workspaces')->assertOk();
         $this->postJson($finish, ['verifier' => $verifier])->assertGone();

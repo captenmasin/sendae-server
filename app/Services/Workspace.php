@@ -39,7 +39,7 @@ class Workspace
             return $account->toArray() + $profile;
         }),
             'media' => Media::latest()->get(), 'publications' => $publications,
-            'settings' => ['workspace_id' => app(WorkspaceOwner::class)->workspaceId(), 'workspaces' => \App\Models\Workspace::where('user_id', app(WorkspaceOwner::class)->requireId())->orderBy('created_at')->get(), 'mode' => config('sendae.mode'), 'mcp_url' => url('/mcp'), 'connections_url' => url('/'), 'paired' => false, 'providers' => collect(config('sendae.providers'))->map(fn ($p) => ['label' => $p['label'], 'configured' => $p['configured'] ?? (bool) ($p['client_id'] ?? null), 'approved' => $p['approved'] ?? true])]];
+            'settings' => ['has_password' => User::findOrFail(app(WorkspaceOwner::class)->requireId())->has_password, 'workspace_id' => app(WorkspaceOwner::class)->workspaceId(), 'workspaces' => \App\Models\Workspace::where('user_id', app(WorkspaceOwner::class)->requireId())->orderBy('created_at')->get(), 'mode' => config('sendae.mode'), 'mcp_url' => url('/mcp'), 'connections_url' => url('/'), 'paired' => false, 'providers' => collect(config('sendae.providers'))->map(fn ($p) => ['label' => $p['label'], 'configured' => $p['configured'] ?? (bool) ($p['client_id'] ?? null), 'approved' => $p['approved'] ?? true])]];
     }
 
     private function draftsForEditing(Collection $publications, Collection $accounts): Collection

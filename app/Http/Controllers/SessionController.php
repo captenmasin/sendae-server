@@ -23,6 +23,7 @@ class SessionController extends Controller
             'workspace_id' => $workspace,
             'name' => $user->name,
             'email' => $user->email,
+            'has_password' => $user->has_password,
         ])->header('Cache-Control', 'no-store');
     }
 

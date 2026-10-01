@@ -121,11 +121,15 @@ class SocialLoginController extends Controller
                         if ($user && ! Hash::check($data['password'] ?? '', $user->password)) {
                             throw ValidationException::withMessages(['password' => 'Enter your existing Sendae password to link this sign-in.']);
                         }
-                        $user ??= User::create($profile + ['password' => Str::random(64)]);
+                        if (! $user) {
+                            $user = new User($profile + ['password' => Str::random(64)]);
+                            $user->has_password = false;
+                            $user->save();
+                        }
                         DB::table('login_identities')->insert(['user_id' => $user->id, 'provider' => $result['provider'], 'provider_id' => $result['provider_id']]);
                     }
 
-                    return ['token' => $user->createToken('Sendae desktop', ['mcp:use'])->accessToken, 'workspace_id' => $user->workspace_id, 'name' => $user->name, 'email' => $user->email];
+                    return ['token' => $user->createToken('Sendae desktop', ['mcp:use'])->accessToken, 'workspace_id' => $user->workspace_id, 'name' => $user->name, 'email' => $user->email, 'has_password' => $user->has_password];
                 });
                 Cache::forget('login_result:'.$ticket);
 
