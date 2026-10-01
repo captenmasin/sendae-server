@@ -41,7 +41,9 @@ class SocialLoginTest extends TestCase
         return [
             'google' => ['google', 'https://oauth2.googleapis.com/token', 'https://openidconnect.googleapis.com/v1/userinfo', ['sub' => 'person-123', 'name' => 'Person', 'email' => 'person@example.com']],
             'facebook' => ['facebook', 'https://graph.facebook.com/v24.0/oauth/access_token', 'https://graph.facebook.com/v24.0/me*', ['id' => 'person-123', 'name' => 'Person', 'email' => 'person@example.com']],
-            'x without email' => ['x', 'https://api.x.com/2/oauth2/token', 'https://api.x.com/2/users/me', ['data' => ['id' => 'person-123', 'name' => 'Person']]],
+            'x with email' => ['x', 'https://api.x.com/2/oauth2/token', 'https://api.x.com/2/users/me*', ['data' => ['id' => 'person-123', 'name' => 'Person', 'confirmed_email' => 'person@example.com']]],
+            'x with invalid email' => ['x', 'https://api.x.com/2/oauth2/token', 'https://api.x.com/2/users/me*', ['data' => ['id' => 'person-123', 'name' => 'Person', 'confirmed_email' => 'invalid']]],
+            'x without email' => ['x', 'https://api.x.com/2/oauth2/token', 'https://api.x.com/2/users/me*', ['data' => ['id' => 'person-123', 'name' => 'Person']]],
         ];
     }
 
@@ -56,12 +58,19 @@ class SocialLoginTest extends TestCase
         if ($provider !== 'facebook') {
             $this->assertSame('S256', $parameters['code_challenge_method']);
         }
+        if ($provider === 'x') {
+            $this->assertContains('users.email', explode(' ', $parameters['scope']));
+        }
         $callback = '/sign-in/'.$provider.'/callback?'.http_build_query(['state' => $parameters['state'], 'code' => 'provider-code']);
         $this->get($callback)->assertRedirect('sendae://sign-in?ticket='.$ticket)->assertContent('')->assertDontSee('provider-secret');
         Http::assertSentCount(2);
         Http::assertSent(fn ($request) => $request->url() === $tokenUrl && $request['redirect_uri'] === route('social-login.callback', $provider) && ($provider === 'facebook' || ! empty($request['code_verifier'])));
+        if ($provider === 'x') {
+            Http::assertSent(fn ($request) => str_starts_with($request->url(), 'https://api.x.com/2/users/me?') && $request['user.fields'] === 'confirmed_email');
+        }
+        $expectedEmail = $provider === 'x' && ($profile['data']['confirmed_email'] ?? '') !== 'person@example.com' ? '' : 'person@example.com';
         $finish = '/api/social-login/finish/'.$ticket;
-        $this->postJson($finish, ['verifier' => $verifier])->assertOk()->assertJsonPath('needs_profile', true)->assertJsonPath('name', 'Person')->assertJsonMissingPath('token');
+        $this->postJson($finish, ['verifier' => $verifier])->assertOk()->assertJsonPath('needs_profile', true)->assertJsonPath('name', 'Person')->assertJsonPath('email', $expectedEmail)->assertJsonMissingPath('token');
         $this->assertDatabaseCount('users', 0);
         $session = $this->postJson($finish, ['verifier' => $verifier, 'name' => 'Person', 'email' => 'PERSON@example.com'])->assertOk()->json();
         $user = User::firstOrFail();

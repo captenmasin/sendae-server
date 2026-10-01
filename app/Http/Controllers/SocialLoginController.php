@@ -40,7 +40,7 @@ class SocialLoginController extends Controller
         [$url, $scope] = match ($provider) {
             'google' => ['https://accounts.google.com/o/oauth2/v2/auth', 'openid email profile'],
             'facebook' => ['https://www.facebook.com/'.config('sendae.meta_version').'/dialog/oauth', 'public_profile,email'],
-            'x' => ['https://x.com/i/oauth2/authorize', 'tweet.read users.read'],
+            'x' => ['https://x.com/i/oauth2/authorize', 'tweet.read users.read users.email'],
         };
         $parameters = ['client_id' => config('sendae.login_providers.'.$provider.'.client_id'), 'redirect_uri' => route('social-login.callback', $provider), 'response_type' => 'code', 'scope' => $scope, 'state' => $state];
         if ($provider !== 'facebook') {
@@ -83,10 +83,10 @@ class SocialLoginController extends Controller
                 $profile = match ($provider) {
                     'google' => $client->get('https://openidconnect.googleapis.com/v1/userinfo')->throw()->json(),
                     'facebook' => $client->get('https://graph.facebook.com/'.config('sendae.meta_version').'/me', ['fields' => 'id,name,email'])->throw()->json(),
-                    'x' => $client->get('https://api.x.com/2/users/me')->throw()->json('data'),
+                    'x' => $client->get('https://api.x.com/2/users/me', ['user.fields' => 'confirmed_email'])->throw()->json('data'),
                 };
                 $identity = Validator::make(['provider_id' => $profile[$provider === 'google' ? 'sub' : 'id'] ?? null], ['provider_id' => 'required|string|max:255'])->validate();
-                $result += $identity + ['name' => mb_substr((string) ($profile['name'] ?? ''), 0, 100), 'email' => filter_var($profile['email'] ?? '', FILTER_VALIDATE_EMAIL) ?: ''];
+                $result += $identity + ['name' => mb_substr((string) ($profile['name'] ?? ''), 0, 100), 'email' => filter_var($profile[$provider === 'x' ? 'confirmed_email' : 'email'] ?? '', FILTER_VALIDATE_EMAIL) ?: ''];
             } catch (ConnectionException|RequestException|ValidationException $exception) {
                 $result['error'] = 'The provider could not complete sign-in. Try again.';
             }
