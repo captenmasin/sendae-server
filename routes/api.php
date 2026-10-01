@@ -6,6 +6,7 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\SessionController;
 use App\Http\Controllers\ConnectionController;
 use App\Http\Controllers\WorkspacesController;
+use App\Http\Controllers\SocialLoginController;
 use App\Http\Controllers\RegistrationController;
 use Laravel\Passport\Http\Middleware\CheckToken;
 use App\Http\Controllers\AuthorizationController;
@@ -15,6 +16,9 @@ Route::post('/register', [RegistrationController::class, 'store'])->middleware('
 Route::post('/forgot-password', [RegistrationController::class, 'forgot'])->middleware('throttle:recovery');
 
 Route::post('/reset-password', [RegistrationController::class, 'reset'])->middleware('throttle:password-reset');
+
+Route::post('/social-login/{provider}', [SocialLoginController::class, 'store'])->whereIn('provider', ['google', 'facebook', 'x'])->middleware('throttle:signin');
+Route::post('/social-login/finish/{ticket}', [SocialLoginController::class, 'finish'])->where('ticket', '[A-Za-z0-9]{64}')->middleware('throttle:signin');
 
 Route::post('/session', [SessionController::class, 'store'])->middleware('throttle:signin');
 

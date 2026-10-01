@@ -4,6 +4,11 @@ return [
     'mode' => 'server',
     'storage_limit_bytes' => (int) env('SENDAE_STORAGE_LIMIT_MB', 1024) * 1024 * 1024,
     'draft_limit' => (int) env('SENDAE_DRAFT_LIMIT', 500),
+    'login_providers' => [
+        'google' => ['client_id' => env('GOOGLE_CLIENT_ID'), 'client_secret' => env('GOOGLE_CLIENT_SECRET')],
+        'facebook' => ['client_id' => env('FACEBOOK_LOGIN_CLIENT_ID'), 'client_secret' => env('FACEBOOK_LOGIN_CLIENT_SECRET')],
+        'x' => ['client_id' => env('X_LOGIN_CLIENT_ID'), 'client_secret' => env('X_LOGIN_CLIENT_SECRET')],
+    ],
     'providers' => [
         'x' => ['label' => 'X', 'client_id' => env('X_CLIENT_ID'), 'client_secret' => env('X_CLIENT_SECRET')],
         'bluesky' => ['label' => 'Bluesky', 'configured' => true],

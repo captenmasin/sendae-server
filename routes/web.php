@@ -5,6 +5,7 @@ use App\Http\Middleware\LocalOrOwner;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\WorkspaceController;
 use App\Http\Controllers\ConnectionController;
+use App\Http\Controllers\SocialLoginController;
 use App\Http\Controllers\AuthorizationController;
 use Laravel\Passport\Http\Controllers\AccessTokenController;
 
@@ -20,3 +21,6 @@ Route::get('/oauth/{provider}/callback', [ConnectionController::class, 'callback
 Route::get('/media/{media}', [WorkspaceController::class, 'publicMedia'])->middleware('signed')->name('media.public');
 Route::get('/oauth/authorize', [AuthorizationController::class, 'start'])->middleware('throttle:connect')->name('passport.authorizations.authorize');
 Route::post('/oauth/token', [AccessTokenController::class, 'issueToken'])->withoutMiddleware('web')->middleware('throttle:60,1')->name('passport.token');
+
+Route::get('/sign-in/{ticket}', [SocialLoginController::class, 'start'])->where('ticket', '[A-Za-z0-9]{64}')->middleware('throttle:60,1')->name('social-login.start')->block(90, 2);
+Route::get('/sign-in/{provider}/callback', [SocialLoginController::class, 'callback'])->whereIn('provider', ['google', 'facebook', 'x'])->middleware('throttle:60,1')->name('social-login.callback')->block(90, 2);

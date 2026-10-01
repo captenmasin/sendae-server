@@ -32,7 +32,7 @@ Set the following before continuing:
 APP_NAME=Sendae
 APP_ENV=production
 APP_DEBUG=false
-APP_URL=https://YOUR-DOMAIN
+APP_URL=https://api.sendae.app
 SESSION_SECURE_COOKIE=true
 DB_CONNECTION=sqlite
 # Use an absolute, persistent database path on the host:
@@ -50,7 +50,7 @@ php artisan passport:client --personal --name='Sendae desktop' --provider=users 
 php artisan optimize
 ```
 
-Package the desktop with `SENDAE_SERVICE_URL=https://YOUR-DOMAIN`. Users register and verify their email, then sign in; no publishing-server or access-token controls are exposed. The desktop keeps each account’s local data in its own workspace. Desktop tokens expire after six months; sign in again to renew. Sign-out revokes the current token. Public registration, email verification and password recovery are implemented. There is no team/billing functionality. The server requires no frontend build and serves no HTML screens. Ship the updated Sendae desktop alongside this server: it registers the `sendae://` scheme and owns password reset, social-account selection and MCP consent.
+Package the desktop with `SENDAE_SERVICE_URL=https://api.sendae.app`. Users register and verify their email, then sign in; no publishing-server or access-token controls are exposed. The desktop keeps each account’s local data in its own workspace. Desktop tokens expire after six months; sign in again to renew. Sign-out revokes the current token. Public registration, email verification and password recovery are implemented. There is no team/billing functionality. The server requires no frontend build and serves no HTML screens. Ship the updated Sendae desktop alongside this server: it registers the `sendae://` scheme and owns password reset, social-account selection and MCP consent.
 
 Schedule Laravel once per minute:
 
@@ -99,11 +99,11 @@ Register exact callbacks:
 
 | Destination | Callback | Environment |
 |---|---|---|
-| X | `https://YOUR-DOMAIN/oauth/x/callback` | `X_CLIENT_ID`, `X_CLIENT_SECRET` |
-| Threads | `https://YOUR-DOMAIN/oauth/threads/callback` | `THREADS_CLIENT_ID`, `THREADS_CLIENT_SECRET` |
-| Facebook Pages | `https://YOUR-DOMAIN/oauth/facebook/callback` | `FACEBOOK_CLIENT_ID`, `FACEBOOK_CLIENT_SECRET` |
-| LinkedIn profile | `https://YOUR-DOMAIN/oauth/linkedin/callback` | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` |
-| LinkedIn Company Page | `https://YOUR-DOMAIN/oauth/linkedin_page/callback` | Same LinkedIn app; `LINKEDIN_PAGES_APPROVED=true` after approval |
+| X | `https://api.sendae.app/oauth/x/callback` | `X_CLIENT_ID`, `X_CLIENT_SECRET` |
+| Threads | `https://api.sendae.app/oauth/threads/callback` | `THREADS_CLIENT_ID`, `THREADS_CLIENT_SECRET` |
+| Facebook Pages | `https://api.sendae.app/oauth/facebook/callback` | `FACEBOOK_CLIENT_ID`, `FACEBOOK_CLIENT_SECRET` |
+| LinkedIn profile | `https://api.sendae.app/oauth/linkedin/callback` | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` |
+| LinkedIn Company Page | `https://api.sendae.app/oauth/linkedin_page/callback` | Dedicated Page app: `LINKEDIN_PAGE_CLIENT_ID`, `LINKEDIN_PAGE_CLIENT_SECRET`; `LINKEDIN_PAGES_APPROVED=true` after approval |
 
 Sendae lets each user choose accounts returned by OAuth. The desktop opens a short-lived connection link in the system browser and the callback returns to Sendae for account selection; no website sign-in or selection page is served. Disconnection erases stored credentials and cancels queued work; it does not revoke the provider's app grant.
 
@@ -111,7 +111,7 @@ Media stays private. Providers receive an HTTPS URL with a signed two-day expiry
 
 ## MCP clients
 
-The hosted endpoint is `https://YOUR-DOMAIN/mcp`. OAuth authorization-server and protected-resource metadata are available under `/.well-known/`. The client registers using `/oauth/register`, uses authorization-code PKCE, and requests `mcp:use`. The authorization endpoint opens Sendae, where the user signs in and explicitly consents; Sendae then returns the authorization code to the requesting client. There is no separate per-post approval in Sendae.
+The hosted endpoint is `https://api.sendae.app/mcp`. OAuth authorization-server and protected-resource metadata are available under `/.well-known/`. The client registers using `/oauth/register`, uses authorization-code PKCE, and requests `mcp:use`. The authorization endpoint opens Sendae, where the user signs in and explicitly consents; Sendae then returns the authorization code to the requesting client. There is no separate per-post approval in Sendae.
 
 Connect that endpoint in Codex, ChatGPT and Claude's custom MCP server settings. Exact UI availability depends on each client/account. Their live OAuth handshakes remain release checks once a public domain exists. Clients that support a bearer token can use a user’s own API token instead.
 
