@@ -139,12 +139,12 @@ test('website cannot start provider oauth', function (): void {
     $this->actingAs($user, 'web')->get('/connect/tiktok')->assertNotFound();
 });
 
-test('oauth callback returns to desktop and api keeps credentials private', function (): void {
+test('x oauth keeps credentials private and reuses the connection profile for state', function (array $profile, ?string $avatarUrl, bool $verified): void {
     $user = User::factory()->create();
     $this->actingAs($user);
     Http::fake([
         'api.x.com/2/oauth2/token' => Http::response(['access_token' => 'access', 'refresh_token' => 'refresh', 'expires_in' => 7200]),
-        'api.x.com/2/users/me' => Http::response(['data' => ['id' => '42', 'name' => "<script>alert('xss')</script>"]]),
+        'api.x.com/2/users/me*' => Http::response(['data' => ['id' => '42', 'name' => "<script>alert('xss')</script>"] + $profile]),
     ]);
 
     $response = $this->withSession([
@@ -153,10 +153,26 @@ test('oauth callback returns to desktop and api keeps credentials private', func
     parse_str(parse_url($response->headers->get('Location'), PHP_URL_QUERY), $link);
     $this->assertStringStartsWith('sendae://connection?', $response->headers->get('Location'));
     Passport::actingAs($user, ['mcp:use']);
-    $this->getJson('/api/connections/'.$link['ticket'])->assertOk()->assertJsonPath('accounts.0.name', "<script>alert('xss')</script>")->assertJsonMissingPath('accounts.0.credentials');
+    $this->getJson('/api/connections/'.$link['ticket'])->assertOk()->assertExactJson([
+        'provider' => 'x', 'workspace_id' => $user->workspace_id,
+        'accounts' => [['provider_id' => '42', 'name' => "<script>alert('xss')</script>"]],
+    ]);
+    $this->postJson('/api/connections/'.$link['ticket'], ['accounts' => [0], 'timezone' => 'Europe/London'])->assertOk()->assertJsonPath('connected', true);
+    $this->getJson('/api/state')->assertOk()->assertJsonPath('accounts.0.avatar_url', $avatarUrl)->assertJsonPath('accounts.0.verified', $verified)->assertJsonMissingPath('accounts.0.credentials');
 
     Http::assertSent(fn ($request) => $request->url() === 'https://api.x.com/2/oauth2/token' && $request['code'] === 'auth-code');
-});
+    Http::assertSent(fn ($request) => str_starts_with($request->url(), 'https://api.x.com/2/users/me?') && $request['user.fields'] === 'profile_image_url,verified,verified_type');
+    Http::assertSentCount(2);
+})->with([
+    'blue badge' => [['profile_image_url' => 'https://images.example/x.jpg', 'verified' => false, 'verified_type' => 'blue'], 'https://images.example/x.jpg', true],
+    'business badge' => [['profile_image_url' => 'https://images.example/x.jpg', 'verified_type' => 'business'], 'https://images.example/x.jpg', true],
+    'government badge' => [['profile_image_url' => 'https://images.example/x.jpg', 'verified_type' => 'government'], 'https://images.example/x.jpg', true],
+    'legacy badge' => [['profile_image_url' => 'https://images.example/x.jpg', 'verified' => true], 'https://images.example/x.jpg', true],
+    'missing profile fields' => [[], null, false],
+    'insecure avatar' => [['profile_image_url' => 'http://images.example/x.jpg'], null, false],
+    'avatar with credentials' => [['profile_image_url' => 'https://user:password@images.example/x.jpg'], null, false],
+    'invalid avatar' => [['profile_image_url' => 'invalid'], null, false],
+]);
 
 test('selection saves to the original workspace and is single use', function (): void {
     $user = User::factory()->create();

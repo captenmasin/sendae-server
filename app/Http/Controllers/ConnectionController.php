@@ -112,9 +112,14 @@ class ConnectionController extends Controller
         $client = Http::withToken($credentials['access_token'])->acceptJson()->timeout(30);
         $choices = [];
         if ($provider === 'x') {
-            $me = $client->get('https://api.x.com/2/users/me');
+            $me = $client->get('https://api.x.com/2/users/me', ['user.fields' => 'profile_image_url,verified,verified_type']);
             $this->check($me);
-            $choices[] = ['provider_id' => $me->json('data.id'), 'name' => $me->json('data.name'), 'credentials' => $credentials];
+            $avatarUrl = $me->json('data.profile_image_url');
+            $profile = [
+                'avatar_url' => is_string($avatarUrl) && filter_var($avatarUrl, FILTER_VALIDATE_URL) && parse_url($avatarUrl, PHP_URL_SCHEME) === 'https' && ! parse_url($avatarUrl, PHP_URL_USER) ? $avatarUrl : null,
+                'verified' => $me->json('data.verified') === true || in_array($me->json('data.verified_type'), ['blue', 'business', 'government'], true),
+            ];
+            $choices[] = ['provider_id' => $me->json('data.id'), 'name' => $me->json('data.name'), 'credentials' => $credentials, 'profile' => $profile];
         } elseif ($provider === 'threads') {
             $me = $client->get('https://graph.threads.net/v1.0/me', ['fields' => 'id,username']);
             $this->check($me);
@@ -175,7 +180,10 @@ class ConnectionController extends Controller
             app(WorkspaceOwner::class)->run($request->user()->id, function () use ($selection, $data): void {
                 foreach ($data['accounts'] as $index) {
                     $account = $selection['accounts'][$index];
-                    Account::updateOrCreate(['provider' => $selection['provider'], 'provider_id' => $account['provider_id']], ['name' => $account['name'], 'credentials' => $account['credentials'], 'status' => 'connected', 'timezone' => $data['timezone']]);
+                    $connectedAccount = Account::updateOrCreate(['provider' => $selection['provider'], 'provider_id' => $account['provider_id']], ['name' => $account['name'], 'credentials' => $account['credentials'], 'status' => 'connected', 'timezone' => $data['timezone']]);
+                    if (isset($account['profile'])) {
+                        Cache::put('account-profile:v2:'.$connectedAccount->id.':'.$connectedAccount->updated_at?->getTimestamp(), $account['profile'], now()->addHour());
+                    }
                 }
             }, $selection['workspace_id']);
             Cache::forget('social_choices:'.$ticket);
