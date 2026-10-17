@@ -1,6 +1,6 @@
 # MVP boundaries and remaining release checks
 
-The implementation is usable for local drafting. Live integrations are implemented but were exercised with fake HTTP responses, not real social credentials. No public server, provider developer apps, paid API credits, or Apple signing credentials were supplied. Do not describe the integrations as live-certified until the release checks in DEPLOYMENT.md pass.
+Provider adapters and publishing flows are implemented and have automated coverage using fake HTTP responses. That evidence does not establish live-provider success, deployed MCP client compatibility, or successful packaged installation and upgrade. Check the dated evidence in VERIFICATION.md and complete the real release checks in DEPLOYMENT.md; configured endpoints and release workflow code are not release certification.
 
 - Each registered user has a private workspace. There are no teams or billing. Local cached data is protected by the operating-system user account; signing out gates app access but does not encrypt draft content on disk.
 - Attachments are limited to 100 MB each. Provider-specific codec, size, duration and dimension restrictions still apply. The app does not transcode or silently discard files. Provider rejection is visible as a failed publication.
@@ -11,5 +11,7 @@ The implementation is usable for local drafting. Live integrations are implement
 - Daily analytics run for seven days and once at/after day 30 (catching up after host downtime); then only on request. Metrics are summed across confirmed thread items and are not unique audience counts.
 - Weekly spring-forward slots with nonexistent local times are skipped. Repeated autumn times choose Carbon's first occurrence. Dates shown in the queue are the actual scheduled instants.
 - Draft/save and schedule request retries return persisted results. To intentionally repeat an identical published draft, edit/save a new revision or create a new draft. Manual rescheduling preserves confirmed thread receipts.
-- The desktop syncs on a 30-second interval while running and before remote operations. Local draft content and attachments are durable before upload. Full-workspace retrieval suits modest individual histories; add pagination if retained history grows enough to make it slow. A conflicted version remains a separate editable draft.
-- No automatic media deletion, database cleanup or retention limits. Back up storage, database, APP_KEY and OAuth keys together.
+- The signed-in desktop attempts sync every five seconds while running, on focus/visibility changes, and before remote operations; concurrent or busy operations can defer a pass. Local draft content and attachments are durable before upload. Desktop edits overwrite the existing server draft in place, including stale-version saves; dirty local drafts survive differing remote state, and no new conflict copies are created. Draft sync alone does not change already-scheduled publication snapshots. Full-workspace retrieval suits modest individual histories; pagination would need to preserve deletion reconciliation.
+- The server defaults to a 1 GB attachment quota and 500 drafts per workspace. These are write limits, not automatic cleanup or retention policies; there is no automatic media garbage collector. Back up storage, database, APP_KEY and OAuth keys together.
+
+The sibling desktop implements signed/notarized distribution and updater publication. Its local ad-hoc builds use a different path. Workflow implementation does not establish a successful installed release or upgrade.

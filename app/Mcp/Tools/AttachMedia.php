@@ -15,7 +15,7 @@ class AttachMedia extends Tool
 
     protected string $name = 'attach_media';
 
-    protected string $description = 'Upload a JPEG, PNG, WebP, MP4 or MOV attachment (max 100 MB). Return its media ID, then include it in a draft item media_ids using save_draft. For large files prefer authenticated POST /api/media multipart upload.';
+    protected string $description = 'Upload a JPEG, PNG, WebP, GIF, MP4 or MOV attachment (max 100 MB). GIF publishing is supported on X and LinkedIn; X allows one GIF up to 15 MB without other attachments. Return its media ID, then include it in a draft item media_ids using save_draft. For large files prefer authenticated POST /api/media multipart upload.';
 
     public function schema(JsonSchema $s): array
     {

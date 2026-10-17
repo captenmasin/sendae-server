@@ -38,6 +38,8 @@ Route::middleware(['auth:api', LocalOrOwner::class, CheckToken::using('mcp:use')
     Route::delete('/session', [SessionController::class, 'destroy']);
     Route::get('/state', [W::class, 'state']);
     Route::post('/drafts', [W::class, 'save']);
+    Route::get('/storage', [W::class, 'storage']);
+    Route::post('/reclaimStorage', [W::class, 'reclaimStorage']);
     Route::post('/media', [W::class, 'upload']);
     Route::get('/media/{media}', [W::class, 'media']);
     foreach (['deleteDraft', 'schedule', 'cancel', 'deletePublication', 'recover', 'account', 'disconnect', 'analytics'] as $action) {

@@ -162,11 +162,11 @@ class SocialProviders
         }
 
         return match ($a->provider) {
-            'bluesky' => app(Bluesky::class)->publish($a, $item['text'], $media, $reply),
-            'x' => $this->x($a, $item['text'], $media, $reply),
-            'threads' => $this->threads($a, $item['text'], $media, $reply),
-            'facebook' => $this->facebook($a, $item['text'], $media),
-            'linkedin','linkedin_page' => $this->linkedin($a, $item['text'], $media),
+            'bluesky' => app(Bluesky::class)->publish($a, $item['text'], $media, $reply, $item['media_alt'] ?? []),
+            'x' => $this->x($a, $item['text'], $media, $reply, $item['media_alt'] ?? []),
+            'threads' => $this->threads($a, $item['text'], $media, $reply, $item['media_alt'] ?? []),
+            'facebook' => $this->facebook($a, $item['text'], $media, $item['media_alt'] ?? []),
+            'linkedin','linkedin_page' => $this->linkedin($a, $item['text'], $media, $item['media_alt'] ?? []),
             default => throw new ProviderFailure('Unsupported destination.'),
         };
     }
@@ -176,12 +176,13 @@ class SocialProviders
         return URL::temporarySignedRoute('media.public', now()->addDays(2), ['media' => $m->id]);
     }
 
-    private function x(Account $a, string $text, $media, ?string $reply): string
+    private function x(Account $a, string $text, $media, ?string $reply, array $descriptions): string
     {
         $payload = ['text' => $text];
         $ids = [];
         foreach ($media as $m) {
-            $init = $this->send($a, 'POST', 'https://api.x.com/2/media/upload/initialize', ['total_bytes' => $m->size, 'media_type' => $m->mime, 'media_category' => str_starts_with($m->mime, 'video/') ? 'tweet_video' : 'tweet_image']);
+            $category = $m->mime === 'image/gif' ? 'tweet_gif' : (str_starts_with($m->mime, 'video/') ? 'tweet_video' : 'tweet_image');
+            $init = $this->send($a, 'POST', 'https://api.x.com/2/media/upload/initialize', ['total_bytes' => $m->size, 'media_type' => $m->mime, 'media_category' => $category]);
             $id = $this->requiredId($init->json('data.id'));
             $stream = Storage::disk('local')->readStream($m->path);
             $segment = 0;
@@ -204,6 +205,12 @@ class SocialProviders
             if ($info && ($info['state'] ?? '') !== 'succeeded') {
                 throw new ProviderFailure('X media processing has not completed.', 'retry');
             }
+            if (str_starts_with($m->mime, 'image/') && ($descriptions[$m->id] ?? '') !== '') {
+                $metadata = $this->send($a, 'POST', 'https://api.x.com/2/media/metadata', ['id' => $id, 'metadata' => ['alt_text' => ['text' => $descriptions[$m->id]]]]);
+                if ($metadata->json('errors') || $metadata->json('data.id') !== $id) {
+                    throw new ProviderFailure('X did not confirm the image description.', 'retry');
+                }
+            }
             $ids[] = $id;
         }
         if ($ids) {
@@ -215,7 +222,7 @@ class SocialProviders
         return $this->requiredId($this->send($a, 'POST', 'https://api.x.com/2/tweets', $payload, true)->json('data.id'), true);
     }
 
-    private function threads(Account $a, string $text, $media, ?string $reply): string
+    private function threads(Account $a, string $text, $media, ?string $reply, array $descriptions): string
     {
         $base = 'https://graph.threads.net/v1.0/';
         $endpoint = $base.$a->provider_id.'/threads';
@@ -228,10 +235,17 @@ class SocialProviders
             $video = str_starts_with($m->mime, 'video/');
             $payload += [$video ? 'video_url' : 'image_url' => $this->mediaUrl($m)];
             $payload['media_type'] = $video ? 'VIDEO' : 'IMAGE';
+            if (! $video && ($descriptions[$m->id] ?? '') !== '') {
+                $payload['alt_text'] = $descriptions[$m->id];
+            }
         } elseif ($media->count() > 1) {
             $children = [];
             foreach ($media as $m) {
-                $children[] = $this->requiredId($this->send($a, 'POST', $endpoint, ['media_type' => 'IMAGE', 'image_url' => $this->mediaUrl($m), 'is_carousel_item' => true])->json('id'));
+                $image = ['media_type' => 'IMAGE', 'image_url' => $this->mediaUrl($m), 'is_carousel_item' => true];
+                if (($descriptions[$m->id] ?? '') !== '') {
+                    $image['alt_text'] = $descriptions[$m->id];
+                }
+                $children[] = $this->requiredId($this->send($a, 'POST', $endpoint, $image)->json('id'));
             }
             $payload['media_type'] = 'CAROUSEL';
             $payload['children'] = implode(',', $children);
@@ -254,7 +268,7 @@ class SocialProviders
         return $this->requiredId($this->send($a, 'POST', $base.$a->provider_id.'/threads_publish', ['creation_id' => $container], true)->json('id'), true);
     }
 
-    private function facebook(Account $a, string $text, $media): string
+    private function facebook(Account $a, string $text, $media, array $descriptions): string
     {
         $base = 'https://graph.facebook.com/'.config('sendae.meta_version').'/'.$a->provider_id;
         if ($media->count() === 1 && str_starts_with($media->first()->mime, 'video/')) {
@@ -263,7 +277,11 @@ class SocialProviders
         $payload = ['message' => $text];
         $attached = [];
         foreach ($media as $m) {
-            $attached[] = ['media_fbid' => $this->requiredId($this->send($a, 'POST', $base.'/photos', ['url' => $this->mediaUrl($m), 'published' => false])->json('id'))];
+            $image = ['url' => $this->mediaUrl($m), 'published' => false];
+            if (($descriptions[$m->id] ?? '') !== '') {
+                $image['alt_text_custom'] = $descriptions[$m->id];
+            }
+            $attached[] = ['media_fbid' => $this->requiredId($this->send($a, 'POST', $base.'/photos', $image)->json('id'))];
         }
         if ($attached) {
             $payload['attached_media'] = $attached;
@@ -272,7 +290,7 @@ class SocialProviders
         return $this->requiredId($this->send($a, 'POST', $base.'/feed', $payload, true)->json('id'), true);
     }
 
-    private function linkedin(Account $a, string $text, $media): string
+    private function linkedin(Account $a, string $text, $media, array $descriptions): string
     {
         $payload = ['author' => $a->provider_id, 'commentary' => $text, 'visibility' => 'PUBLIC', 'distribution' => ['feedDistribution' => 'MAIN_FEED', 'targetEntities' => [], 'thirdPartyDistributionChannels' => []], 'lifecycleState' => 'PUBLISHED', 'isReshareDisabledByAuthor' => false];
         $assets = [];
@@ -320,10 +338,14 @@ class SocialProviders
             if ($status !== 'AVAILABLE') {
                 throw new ProviderFailure('LinkedIn media is still processing.', 'retry');
             }
-            $assets[] = ['id' => $id, 'altText' => $m->name];
+            $asset = ['id' => $id];
+            if (! $video && ($descriptions[$m->id] ?? '') !== '') {
+                $asset['altText'] = $descriptions[$m->id];
+            }
+            $assets[] = $asset;
         }
         if (count($assets) === 1) {
-            $payload['content'] = ['media' => ['id' => $assets[0]['id']]];
+            $payload['content'] = ['media' => $assets[0]];
         } elseif (count($assets) > 1) {
             $payload['content'] = ['multiImage' => ['images' => $assets]];
         }

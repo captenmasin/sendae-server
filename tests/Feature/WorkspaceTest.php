@@ -49,6 +49,60 @@ beforeEach(function (): void {
     Http::preventStrayRequests();
 });
 
+test('tags and notes persist privately while legacy planning dates are discarded', function (): void {
+    Passport::actingAs(User::factory()->create(), ['mcp:use']);
+    $payload = ['id' => (string) Str::uuid(), 'title' => '', 'version' => 0, 'content' => ['items' => [['text' => '', 'media_ids' => []]], 'overrides' => [], 'account_ids' => [], 'planned_at' => '2026-10-20T09:00', 'tags' => ['Launch'], 'notes' => 'Private research']];
+
+    $this->postJson('/api/drafts', $payload)->assertOk()->assertJsonMissingPath('draft.content.planned_at');
+    unset($payload['content']['planned_at']);
+    expect(Draft::findOrFail($payload['id'])->content)->toBe($payload['content']);
+    $this->getJson('/api/state')->assertOk()->assertJsonPath('drafts.0.content', $payload['content']);
+    $this->assertDatabaseCount('publications', 0);
+
+    Passport::actingAs(User::factory()->create(), ['mcp:use']);
+    $this->getJson('/api/state')->assertOk()->assertJsonCount(0, 'drafts');
+    $this->postJson('/api/drafts', $payload)->assertNotFound();
+});
+
+test('draft metadata is excluded from publication snapshots and provider requests', function (): void {
+    Passport::actingAs(User::factory()->create(), ['mcp:use']);
+    $account = workspaceAccount();
+    $payload = ['id' => (string) Str::uuid(), 'title' => 'Internal title', 'version' => 0, 'content' => ['items' => [['text' => 'Public post', 'media_ids' => []]], 'overrides' => [], 'account_ids' => [$account->id], 'tags' => ['Private tag'], 'notes' => 'Private research', 'planned_at' => '2026-10-20T09:00']];
+    $this->postJson('/api/drafts', $payload)->assertOk();
+    Http::fake(['api.x.com/2/tweets' => Http::response(['data' => ['id' => 'posted']])]);
+
+    $publication = $this->postJson('/api/schedule', ['draft_id' => $payload['id'], 'version' => 1, 'mode' => 'now'])->assertOk()->json('0');
+
+    expect(Publication::findOrFail($publication['id'])->snapshot)->toBe(['title' => 'Internal title', 'items' => $payload['content']['items']]);
+    app(Publisher::class)->publish($publication['id']);
+    Http::assertSent(fn ($request) => $request->url() === 'https://api.x.com/2/tweets' && $request->data() === ['text' => 'Public post']);
+});
+
+test('invalid draft metadata returns 422 without saving', function (array $metadata, string $key): void {
+    Passport::actingAs(User::factory()->create(), ['mcp:use']);
+    $payload = ['id' => (string) Str::uuid(), 'title' => '', 'version' => 0, 'content' => ['items' => [['text' => '', 'media_ids' => []]], 'overrides' => [], 'account_ids' => [], ...$metadata]];
+
+    $this->postJson('/api/drafts', $payload)->assertUnprocessable()->assertJsonValidationErrors($key);
+
+    $this->assertDatabaseMissing('drafts', ['id' => $payload['id']]);
+})->with([
+    'tag list' => [['tags' => 'Launch'], 'content.tags'],
+    'too many tags' => [['tags' => array_map(fn ($i) => "Tag $i", range(1, 21))], 'content.tags'],
+    'empty tag' => [['tags' => ['']], 'content.tags.0'],
+    'long tag' => [['tags' => [str_repeat('a', 51)]], 'content.tags.0'],
+    'duplicate tags' => [['tags' => ['Launch', 'launch']], 'content.tags.0'],
+    'notes type' => [['notes' => ['private']], 'content.notes'],
+    'long notes' => [['notes' => str_repeat('a', 20001)], 'content.notes'],
+]);
+
+test('obsolete planning dates do not prevent server drafts being saved', function (): void {
+    Passport::actingAs(User::factory()->create(), ['mcp:use']);
+    $payload = ['id' => (string) Str::uuid(), 'title' => '', 'version' => 0, 'content' => ['items' => [['text' => '', 'media_ids' => []]], 'overrides' => [], 'account_ids' => [], 'planned_at' => 'not-a-date']];
+
+    $this->postJson('/api/drafts', $payload)->assertOk()->assertJsonMissingPath('draft.content.planned_at');
+    expect(Draft::findOrFail($payload['id'])->content)->not->toHaveKey('planned_at');
+});
+
 test('scheduled updates replace network content and destinations without moving existing times', function (): void {
     $this->freezeTime();
     Passport::actingAs(User::factory()->create(), ['mcp:use']);
@@ -425,9 +479,70 @@ test('x failures preserve provider details and recovery state', function (array|
     ['<html>Proxy error</html>', 400, 'failed', null],
 ]);
 
-test('image uploads reach x and linkedin without discarding media', function (): void {
+test('GIF uploads preserve bytes through multipart and base64 and reject a forged extension', function (): void {
+    Passport::actingAs(User::factory()->create(), ['mcp:use']);
     Storage::fake('local');
-    $m = app(Attachments::class)->store(UploadedFile::fake()->image('photo.png'));
+    $file = UploadedFile::fake()->image('animation.gif');
+    $bytes = $file->getContent();
+
+    $media = $this->post('/api/media', ['file' => $file], ['Accept' => 'application/json'])->assertCreated()->assertJsonPath('mime', 'image/gif')->json();
+
+    expect(Storage::disk('local')->get(Media::findOrFail($media['id'])->path))->toBe($bytes);
+    $encoded = app(Attachments::class)->base64(['name' => 'animation.gif', 'base64' => base64_encode($bytes)]);
+    expect($encoded->mime)->toBe('image/gif');
+    expect(Storage::disk('local')->get($encoded->path))->toBe($bytes);
+    $spoofed = UploadedFile::fake()->createWithContent('script.gif', '<?php echo "unsafe";');
+    $this->post('/api/media', ['file' => new UploadedFile($spoofed->getRealPath(), 'script.gif', null, null, true)], ['Accept' => 'application/json'])->assertUnprocessable()->assertJsonValidationErrors('file');
+});
+
+test('GIF drafts schedule for supported providers', function (string $provider): void {
+    Storage::fake('local');
+    $account = workspaceAccount($provider);
+    $media = app(Attachments::class)->store(UploadedFile::fake()->image('animation.gif'));
+    $draft = draft($account, [['text' => 'Animated', 'media_ids' => [$media->id]]]);
+
+    $publications = app(Workspace::class)->schedule(['draft_id' => $draft->id, 'version' => 1, 'mode' => 'now']);
+
+    expect($publications)->toHaveCount(1);
+    expect($publications[0]->snapshot['items'][0]['media_ids'])->toBe([$media->id]);
+    Http::assertNothingSent();
+})->with(['x', 'linkedin', 'linkedin_page']);
+
+test('unsupported GIF destinations return 422 without scheduling', function (string $provider): void {
+    Passport::actingAs(User::factory()->create(), ['mcp:use']);
+    Storage::fake('local');
+    $account = workspaceAccount($provider);
+    $media = app(Attachments::class)->store(UploadedFile::fake()->image('animation.gif'));
+    $draft = draft($account, [['text' => 'Animated', 'media_ids' => [$media->id]]]);
+
+    $this->postJson('/api/schedule', ['draft_id' => $draft->id, 'version' => 1, 'mode' => 'now'])->assertUnprocessable()->assertJsonValidationErrors('media')->assertJsonPath('errors.media.0', 'Test account: GIF publishing is supported on X and LinkedIn. Use an image or video for this destination.');
+
+    $this->assertDatabaseCount('publications', 0);
+    Http::assertNothingSent();
+})->with(['threads', 'facebook', 'bluesky']);
+
+test('mixed or oversized X GIFs return 422 without scheduling', function (bool $mixed): void {
+    Passport::actingAs(User::factory()->create(), ['mcp:use']);
+    Storage::fake('local');
+    $account = workspaceAccount();
+    $media = app(Attachments::class)->store(UploadedFile::fake()->image('animation.gif'));
+    $ids = [$media->id];
+    if ($mixed) {
+        $ids[] = app(Attachments::class)->store(UploadedFile::fake()->image('photo.png'))->id;
+    } else {
+        $media->update(['size' => 15 * 1024 * 1024 + 1]);
+    }
+    $draft = draft($account, [['text' => 'Animated', 'media_ids' => $ids]]);
+
+    $this->postJson('/api/schedule', ['draft_id' => $draft->id, 'version' => 1, 'mode' => 'now'])->assertUnprocessable()->assertJsonValidationErrors('media');
+
+    $this->assertDatabaseCount('publications', 0);
+    Http::assertNothingSent();
+})->with(['mixed attachments' => true, 'oversized GIF' => false]);
+
+test('image and GIF uploads reach x and linkedin without discarding media', function (string $extension, string $mime, string $category): void {
+    Storage::fake('local');
+    $m = app(Attachments::class)->store(UploadedFile::fake()->image('photo.'.$extension));
     $x = workspaceAccount();
     Http::fake([
         'api.x.com/2/media/upload/initialize' => Http::response(['data' => ['id' => 'media1']]),
@@ -436,6 +551,8 @@ test('image uploads reach x and linkedin without discarding media', function ():
         'api.x.com/2/tweets' => Http::response(['data' => ['id' => 'post1']]),
     ]);
     $this->assertSame('post1', app(SocialProviders::class)->publish($x, ['text' => 'Photo', 'media_ids' => [$m->id]], null));
+    Http::assertSent(fn ($r) => $r->url() === 'https://api.x.com/2/media/upload/initialize' && $r['media_type'] === $mime && $r['media_category'] === $category);
+    Http::assertSent(fn ($r) => str_ends_with($r->url(), '/media1/append') && base64_decode($r['media'], true) === Storage::disk('local')->get($m->path));
     Http::assertSent(fn ($r) => $r->url() === 'https://api.x.com/2/tweets' && $r['media']['media_ids'] === ['media1']);
     Http::assertSent(fn ($r) => $r->url() === 'https://api.x.com/2/media/upload/media1/finalize' && $r->method() === 'POST' && $r->body() === '');
     $li = workspaceAccount('linkedin');
@@ -447,7 +564,10 @@ test('image uploads reach x and linkedin without discarding media', function ():
     ]);
     $this->assertSame('urn:li:share:456', app(SocialProviders::class)->publish($li, ['text' => 'Photo', 'media_ids' => [$m->id]], null));
     Http::assertSent(fn ($r) => $r->url() === 'https://api.linkedin.com/rest/posts' && $r['content']['media']['id'] === 'urn:li:image:123');
-});
+})->with([
+    'PNG' => ['png', 'image/png', 'tweet_image'],
+    'GIF' => ['gif', 'image/gif', 'tweet_gif'],
+]);
 
 test('failed metric refresh keeps counts and success timestamp', function (): void {
     $p = scheduled(workspaceAccount());

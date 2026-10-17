@@ -17,6 +17,25 @@ use Illuminate\Validation\ValidationException;
 
 class Workspace
 {
+    public function disconnectAccount(array $data): array
+    {
+        $data = Validator::make($data, ['id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())]])->validate();
+        $account = Account::findOrFail($data['id']);
+        $account->update(['status' => 'disconnected', 'credentials' => null]);
+        Publication::where('account_id', $account->id)->whereIn('status', ['scheduled', 'retry'])->update(['status' => 'cancelled', 'error' => 'Account disconnected.']);
+
+        return ['disconnected' => true];
+    }
+
+    public function savePostingSlots(array $data): Account
+    {
+        $data = Validator::make($data, ['id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())], 'timezone' => 'required|timezone', 'slots' => 'present|array|max:100', 'slots.*.day' => 'required|integer|between:0,6', 'slots.*.time' => 'required|date_format:H:i'])->validate();
+        $account = Account::findOrFail($data['id']);
+        $account->update(collect($data)->except('id')->all());
+
+        return $account;
+    }
+
     public function state(): array
     {
         $accounts = Account::orderBy('name')->get();
@@ -33,13 +52,13 @@ class Workspace
             }
         }
 
-        return ['deleted_draft_ids' => Draft::onlyTrashed()->pluck('id'), 'drafts' => $this->draftsForEditing($publications, $accounts), 'accounts' => $accounts->map(function (Account $account): array {
+        return ['deleted_media_ids' => Media::onlyTrashed()->pluck('id'), 'deleted_draft_ids' => Draft::onlyTrashed()->pluck('id'), 'drafts' => $this->draftsForEditing($publications, $accounts), 'accounts' => $accounts->map(function (Account $account): array {
             $profile = app(SocialProviders::class)->profile($account);
 
             return $account->toArray() + $profile;
         }),
             'media' => Media::latest()->get(), 'publications' => $publications,
-            'settings' => ['has_password' => User::findOrFail(app(WorkspaceOwner::class)->requireId())->has_password, 'workspace_id' => app(WorkspaceOwner::class)->workspaceId(), 'workspaces' => \App\Models\Workspace::where('user_id', app(WorkspaceOwner::class)->requireId())->orderBy('created_at')->get(), 'mode' => config('sendae.mode'), 'mcp_url' => url('/mcp'), 'connections_url' => url('/'), 'paired' => false, 'providers' => collect(config('sendae.providers'))->map(fn ($p) => ['label' => $p['label'], 'configured' => $p['configured'] ?? (bool) ($p['client_id'] ?? null), 'approved' => $p['approved'] ?? true])]];
+            'settings' => ['storage' => app(Attachments::class)->usage(), 'has_password' => User::findOrFail(app(WorkspaceOwner::class)->requireId())->has_password, 'workspace_id' => app(WorkspaceOwner::class)->workspaceId(), 'workspaces' => \App\Models\Workspace::where('user_id', app(WorkspaceOwner::class)->requireId())->orderBy('created_at')->get(), 'mode' => config('sendae.mode'), 'mcp_url' => url('/mcp'), 'connections_url' => url('/'), 'paired' => false, 'providers' => collect(config('sendae.providers'))->map(fn ($p) => ['label' => $p['label'], 'configured' => $p['configured'] ?? (bool) ($p['client_id'] ?? null), 'approved' => $p['approved'] ?? true])]];
     }
 
     private function draftsForEditing(Collection $publications, Collection $accounts): Collection
@@ -59,7 +78,7 @@ class Workspace
                     }
                 }
                 $data['title'] = $posts->first()->snapshot['title'] ?? '';
-                $data['content'] = ['items' => $posts->first()->snapshot['items'], 'overrides' => (object) $overrides, 'account_ids' => $posts->pluck('account_id')->unique()->values()->all()];
+                $data['content'] = [...$data['content'], 'items' => $posts->first()->snapshot['items'], 'overrides' => (object) $overrides, 'account_ids' => $posts->pluck('account_id')->unique()->values()->all()];
                 $data['restore_scheduled'] = true;
             }
 
@@ -72,14 +91,26 @@ class Workspace
         $data = Validator::make($data, [
             'restore_scheduled' => 'sometimes|boolean',
             'id' => 'required|uuid', 'title' => 'nullable|string|max:200', 'version' => 'required|integer|min:0',
-            'content' => 'required|array:items,overrides,account_ids', 'content.items' => 'required|array|min:1|max:30',
-            'content.items.*' => 'required|array:text,media_ids', 'content.items.*.text' => 'present|nullable|string|max:65000',
+            'content' => 'required|array:items,overrides,account_ids,planned_at,tags,notes', 'content.items' => 'required|array|min:1|max:30',
+            'content.planned_at' => 'exclude',
+            'content.tags' => 'sometimes|array|list|max:20', 'content.tags.*' => 'required|string|max:50|distinct:ignore_case',
+            'content.notes' => 'sometimes|nullable|string|max:20000',
+            'content.items.*' => 'required|array:text,media_ids,media_alt', 'content.items.*.text' => 'present|nullable|string|max:65000',
             'content.items.*.media_ids' => 'present|array|max:20', 'content.items.*.media_ids.*' => 'uuid',
+            'content.items.*.media_alt' => 'sometimes|array|max:20', 'content.items.*.media_alt.*' => 'nullable|string|max:1000',
             'content.overrides' => 'present|array', 'content.overrides.*' => 'array|min:1|max:30',
-            'content.overrides.*.*' => 'array:text,media_ids', 'content.overrides.*.*.text' => 'present|nullable|string|max:65000',
+            'content.overrides.*.*' => 'array:text,media_ids,media_alt', 'content.overrides.*.*.text' => 'present|nullable|string|max:65000',
             'content.overrides.*.*.media_ids' => 'present|array|max:20', 'content.overrides.*.*.media_ids.*' => 'uuid',
+            'content.overrides.*.*.media_alt' => 'sometimes|array|max:20', 'content.overrides.*.*.media_alt.*' => 'nullable|string|max:1000',
             'content.account_ids' => 'present|array|max:30', 'content.account_ids.*' => 'uuid',
         ])->validate();
+        foreach ([$data['content']['items'], ...array_values($data['content']['overrides'])] as $items) {
+            foreach ($items as $item) {
+                if (array_diff(array_keys($item['media_alt'] ?? []), $item['media_ids'])) {
+                    $this->invalid('content', 'Image descriptions must refer to attachments on the same post.');
+                }
+            }
+        }
         $data['title'] = ($data['title'] ?? '') ?: 'Untitled draft';
         foreach ($data['content']['items'] as &$item) {
             $item['text'] ??= '';
@@ -142,7 +173,11 @@ class Workspace
     {
         $items = $draft->content['overrides'][$account->provider] ?? $draft->content['items'];
         if (in_array($account->provider, ['facebook', 'linkedin', 'linkedin_page']) && count($items) > 1) {
+            $descriptions = array_replace(...array_map(fn ($item) => $item['media_alt'] ?? [], $items));
             $items = [['text' => implode("\n\n", array_column($items, 'text')), 'media_ids' => array_merge(...array_column($items, 'media_ids'))]];
+            if ($descriptions) {
+                $items[0]['media_alt'] = $descriptions;
+            }
         }
         $limit = ['bluesky' => 300, 'x' => 280, 'threads' => 500, 'facebook' => 63206, 'linkedin' => 3000, 'linkedin_page' => 3000][$account->provider];
         foreach ($items as $i => $item) {
@@ -156,6 +191,14 @@ class Workspace
             $media = Media::whereIn('id', $item['media_ids'])->get();
             if ($media->count() !== count($item['media_ids'])) {
                 $this->invalid('media', 'Some attachments have not synchronized.');
+            }
+            if ($media->contains('mime', 'image/gif')) {
+                if (! in_array($account->provider, ['x', 'linkedin', 'linkedin_page'])) {
+                    $this->invalid('media', "{$account->name}: GIF publishing is supported on X and LinkedIn. Use an image or video for this destination.");
+                }
+                if ($account->provider === 'x' && ($media->count() > 1 || $media->first()->size > 15 * 1024 * 1024)) {
+                    $this->invalid('media', 'X supports one GIF up to 15 MB per post, without other attachments.');
+                }
             }
             $mediaHost = strtolower(parse_url(config('app.url'), PHP_URL_HOST) ?? '');
             if ($media->isNotEmpty() && in_array($account->provider, ['threads', 'facebook']) && ($mediaHost === 'localhost' || str_ends_with($mediaHost, '.test') || str_ends_with($mediaHost, '.localhost'))) {
@@ -427,10 +470,18 @@ class Workspace
     {
         $key = hash('sha256', app(WorkspaceOwner::class)->workspaceId().'|'.$operation.json_encode($data, JSON_THROW_ON_ERROR));
 
-        return DB::transaction(function () use ($key, $action) {
+        return DB::transaction(function () use ($key, $action, $operation, $data) {
             User::lockForUpdate()->findOrFail(app(WorkspaceOwner::class)->requireId());
+            if ($operation === 'save') {
+                app(Attachments::class)->validateContent($data['content']);
+            }
             if ($receipt = DB::table('operation_receipts')->where('id', $key)->first()) {
-                return json_decode($receipt->response, true, 512, JSON_THROW_ON_ERROR);
+                $result = json_decode($receipt->response, true, 512, JSON_THROW_ON_ERROR);
+                if ($operation === 'save') {
+                    app(Attachments::class)->validateContent($result['draft']['content']);
+                }
+
+                return $result;
             }
             $result = $action();
             DB::table('operation_receipts')->insert(['id' => $key, 'response' => json_encode($result, JSON_THROW_ON_ERROR), 'created_at' => now()]);

@@ -19,14 +19,14 @@ class CancelPublication extends Tool
 
     public function schema(JsonSchema $s): array
     {
-        return ['workspace_id' => $s->string()->description('Id from a workspace call with no arguments.')->required(), 'id' => $s->string()->required()];
+        return ['workspace_id' => $s->string()->description('Id from a workspace call with no arguments.')->required(), 'id' => $s->string()->required(), 'separate' => $s->boolean()->description('Move this destination into a separate draft and keep other destinations scheduled.')];
     }
 
     public function handle(Request $r): Response
     {
         $this->selectWorkspace($r);
-        $r->validate(['id' => 'required|uuid']);
+        $r->validate(['id' => 'required|uuid', 'separate' => 'sometimes|boolean']);
 
-        return Response::json(app(Workspace::class)->cancel($r->get('id')));
+        return Response::json(app(Workspace::class)->cancel($r->get('id'), (bool) $r->get('separate', false)));
     }
 }

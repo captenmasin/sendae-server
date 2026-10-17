@@ -2,7 +2,7 @@
 
 ## Ploi
 
-Create a Laravel site, web directory `public`, PHP 8.3+ (8.5 if available), project root the repository. Point the document root at `public/`. Do not enable zero-downtime until storage, `.env`, and Passport keys are on a shared path.
+Create a Laravel site, web directory `public`, PHP 8.5, project root the repository. Point the document root at `public/`. Do not enable zero-downtime until storage, `.env`, and Passport keys are on a shared path.
 
 Paste `.ploi/deploy.sh` into **Repository → Deploy script**. Ploi substitutes `{SITE_DIRECTORY}`, `{BRANCH}`, `{SITE_PHP}`, `{SITE_COMPOSER}`, and `{RELOAD_PHP_FPM}`. Create the `.env` in Ploi before the first deploy; the script will not invent an `APP_KEY`.
 
@@ -16,14 +16,15 @@ Replace `{SITE_PHP}` with the site PHP binary shown in Ploi (for example `php8.5
 
 ## Host requirements
 
-Deploy the Sendae-server project with its own environment and database. The domain must use valid HTTPS, point its document root at `public/`, and run PHP 8.3+ with SQLite or a Laravel-supported database, mbstring, fileinfo, openssl, curl, and a persistent writable storage directory. Keep `APP_KEY`, the database, OAuth signing keys, and `storage/app/private` in backups together. Never regenerate an existing production APP_KEY: it encrypts saved credentials.
+Deploy the Sendae-server project with its own environment and database. Use PHP 8.5 with SQLite or a Laravel-supported database, mbstring, fileinfo, openssl, curl, and a persistent writable storage directory. The domain must use valid HTTPS and point its document root at `public/`. The supplied Ploi script specifically backs up `database/database.sqlite` with `sqlite3`; adapt that backup step before using another database or path. Keep `APP_KEY`, the database, OAuth signing keys, and `storage/app/private` in backups together. Never regenerate an existing production APP_KEY: it encrypts saved credentials.
 
 Use 512 MB PHP memory, `upload_max_filesize=100M`, `post_max_size=140M` (MCP base64 uploads need more than raw file size), and an appropriate proxy request-body limit. Larger video uploads are deliberately outside the MVP's 100 MB attachment limit. JSON parsing of base64 uploads uses memory; prefer multipart `/api/media` for video.
 
 ```sh
 composer install --no-dev --optimize-autoloader
-cp .env.example .env
-php artisan key:generate
+test -f .env || cp .env.example .env
+# If APP_KEY is empty, run php artisan key:generate --no-interaction once.
+# Never overwrite an existing environment or regenerate its key.
 ```
 
 Set the following before continuing:
@@ -44,13 +45,14 @@ QUEUE_CONNECTION=database
 Create the database file if using SQLite, then:
 
 ```sh
-php artisan migrate --force
-php artisan passport:keys
+php artisan migrate --force --no-interaction
+# First install only, if Passport signing keys and the desktop client are absent:
+php artisan passport:keys --no-interaction
 php artisan passport:client --personal --name='Sendae desktop' --provider=users --no-interaction
-php artisan optimize
+php artisan optimize --no-interaction
 ```
 
-Package the desktop with `SENDAE_SERVICE_URL=https://api.sendae.app`. Users register and verify their email, then sign in; no publishing-server or access-token controls are exposed. The desktop keeps each account’s local data in its own workspace. Desktop tokens expire after six months; sign in again to renew. Sign-out revokes the current token. Public registration, email verification and password recovery are implemented. There is no team/billing functionality. The server requires no frontend build and serves no HTML screens. Ship the updated Sendae desktop alongside this server: it registers the `sendae://` scheme and owns password reset, social-account selection and MCP consent.
+Package the desktop with `SENDAE_SERVICE_URL=https://api.sendae.app` (the desktop's current default), after confirming that is the intended deployed service. Remove any development-only `SENDAE_SERVICE_CA` path. Users register and sign in immediately; no email verification, publishing-server or access-token controls are required. The desktop keeps each account’s local workspaces isolated. Desktop tokens expire after six months; sign in again to renew. Sign-out revokes the current token. Public registration and password recovery are implemented; verification endpoints have been removed. There is no team/billing functionality. The server requires no frontend build; its only HTML page is the `/oauth/authorize` desktop handoff. Ship the updated Sendae desktop alongside this server: it registers the `sendae://` scheme and owns password reset, social-account selection and MCP consent. Desktop signing, notarization and updater automation are implemented in the sibling desktop repository; successful installation and upgrade require separate evidence.
 
 Schedule Laravel once per minute:
 
@@ -83,11 +85,11 @@ SESSION_SECURE_COOKIE=true
 SESSION_COOKIE=sendae_server_session
 ```
 
-Follow your mail provider’s TLS/port settings. Account signup is gated when a production deployment uses the log/array/failover mailers. Local development uses Herd Mail capture on port 2525; captured emails do not reach external inboxes.
+Follow your mail provider’s TLS/port settings. Password recovery is gated when a production deployment uses the log/array/failover mailers; registration does not require mail delivery. Local development can use Herd Mail capture with SMTP on port 2525; the example environment uses the log mailer. Captured emails do not reach external inboxes.
 
-Verify real inbox delivery for signup and password recovery before opening registration publicly. Verification links expire after 60 minutes. Reset links use Laravel’s configured 60-minute expiry and single-use broker; resetting a password revokes API tokens and web sessions.
+Verify real inbox delivery for password recovery before release. Registration sends no verification email, and API, OAuth and MCP access do not require `email_verified_at`. Reset links use the configured 60-minute expiry and single-use broker; resetting a password revokes API tokens and web sessions.
 
-Existing server records migrate to the original owner’s private workspace. Existing unverified owners must verify their email via resend verification. Back up the database and keys before applying isolation migrations; their rollback deliberately requires restoring a backup to avoid mixing customer data.
+Existing server records migrate to the original owner’s private workspace. Existing unverified accounts can sign in without a verification step. Back up the database and keys before applying isolation migrations; their rollback deliberately requires restoring a backup to avoid mixing customer data.
 
 Each workspace defaults to 1 GB of attachments and 500 drafts. Configure `SENDAE_STORAGE_LIMIT_MB` and `SENDAE_DRAFT_LIMIT` on the server to fit the release’s storage plan. Limits are enforced per workspace before writes; duplicate upload retries do not consume extra capacity.
 
@@ -113,21 +115,21 @@ Media stays private. Providers receive an HTTPS URL with a signed two-day expiry
 
 The hosted endpoint is `https://api.sendae.app/mcp`. OAuth authorization-server and protected-resource metadata are available under `/.well-known/`. The client registers using `/oauth/register`, uses authorization-code PKCE, and requests `mcp:use`. The authorization endpoint opens Sendae, where the user signs in and explicitly consents; Sendae then returns the authorization code to the requesting client. There is no separate per-post approval in Sendae.
 
-Connect that endpoint in Codex, ChatGPT and Claude's custom MCP server settings. Exact UI availability depends on each client/account. Their live OAuth handshakes remain release checks once a public domain exists. Clients that support a bearer token can use a user’s own API token instead.
+Connect that endpoint in Codex, ChatGPT and Claude's custom MCP server settings. Exact UI availability depends on each client/account. Verify each client's live OAuth handshake against the deployed domain; endpoint configuration alone does not establish client compatibility. Clients that support a bearer token can use a user’s own API token instead.
 
 Local stdio MCP is provided only by the desktop project and requires a signed-in profile. The server exposes authenticated HTTP MCP; there is no unrestricted server stdio workspace.
 
-Tools: workspace, save_draft, attach_media, schedule_post, cancel_publication, recover_publication, refresh_analytics. `schedule_post` with mode `now` publishes at the next worker run. Workspace returns cached counts without paid provider reads. Manual analytics refresh can incur read charges.
+Read `workspace` first and discover the registered tools with MCP `tools/list` for the deployed version. Core operations include draft save, media attachment, scheduling, cancellation, recovery and analytics refresh. `schedule_post` with mode `now` publishes at the next worker run. Workspace returns cached counts without paid provider reads. Manual analytics refresh can incur read charges.
 
 ## Live release checks
 
 1. Connect and disconnect each requested destination through OAuth; verify roles and permissions.
-2. Pair the desktop, draft and attach a photo/video offline, quit/reopen, synchronize, and confirm an agent sees the same draft. Make conflicting edits and confirm both copies survive.
+2. Sign in on the desktop, draft and attach a photo/video offline, quit/reopen, synchronize, and confirm an agent sees the same draft. Make conflicting edits and confirm local content overwrites the existing server draft in place without creating a conflict copy; already-scheduled publication snapshots must remain unchanged.
 3. Publish text, links, images, video and multi-part threads to test accounts. Verify each provider's returned IDs, rendered content and media.
 4. Schedule exact times and weekly slots, quit the desktop, and confirm server-only delivery. Check local DST behavior in the selected account timezone.
 5. Exercise a temporary rate limit, worker interruption and 24-hour expiry. Verify successful destinations and confirmed thread items are not duplicated.
 6. Exercise OAuth with all three requested MCP clients, including media uploads, schedule, cancel, results and analytics.
-7. Verify emailed verification/reset links and OAuth consent open the installed Sendae app from both a running and a closed state.
+7. Verify password reset links and OAuth consent open the installed Sendae app from both a running and a closed state. Confirm registration permits immediate sign-in without verification mail.
 8. Confirm valid analytics permissions, provider-specific names, unavailable-vs-zero display and retained timestamps.
 9. Check actual X API usage charges and storage/transfer costs against the £10/month target.
 

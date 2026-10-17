@@ -30,6 +30,16 @@ class WorkspaceController extends Controller
         return $workspace->deleteDraft($request->all());
     }
 
+    public function storage(Attachments $attachments): array
+    {
+        return $attachments->usage();
+    }
+
+    public function reclaimStorage(Request $request, Attachments $attachments): array
+    {
+        return $attachments->reclaim($request->all());
+    }
+
     public function upload(Request $r, Attachments $a)
     {
         $r->validate(['file' => 'required|file', 'id' => 'nullable|uuid']);
@@ -78,23 +88,14 @@ class WorkspaceController extends Controller
         return $w->recover($r->all());
     }
 
-    public function account(Request $r)
+    public function account(Request $request, Workspace $workspace): Account
     {
-        $data = $r->validate(['id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())], 'timezone' => 'required|timezone', 'slots' => 'present|array|max:100', 'slots.*.day' => 'required|integer|between:0,6', 'slots.*.time' => 'required|date_format:H:i']);
-        $account = Account::findOrFail($data['id']);
-        $account->update(collect($data)->except('id')->all());
-
-        return $account;
+        return $workspace->savePostingSlots($request->all());
     }
 
     public function disconnect(Request $r)
     {
-        $r->validate(['id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())]]);
-        $account = Account::findOrFail($r->id);
-        $account->update(['status' => 'disconnected', 'credentials' => null]);
-        Publication::where('account_id', $account->id)->whereIn('status', ['scheduled', 'retry'])->update(['status' => 'cancelled', 'error' => 'Account disconnected.']);
-
-        return ['disconnected' => true];
+        return app(Workspace::class)->disconnectAccount($r->all());
     }
 
     public function analytics(Request $r)

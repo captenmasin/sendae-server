@@ -102,7 +102,7 @@ class Bluesky
     }
 
     /** @param Collection<int, Media> $media */
-    public function publish(Account $account, string $text, Collection $media, ?string $reply): string
+    public function publish(Account $account, string $text, Collection $media, ?string $reply, array $descriptions = []): string
     {
         $record = ['$type' => 'app.bsky.feed.post', 'text' => $text, 'createdAt' => now()->toIso8601String()];
         preg_match_all('~https?://[^\s<>]+~u', $text, $links, PREG_OFFSET_CAPTURE);
@@ -122,7 +122,7 @@ class Bluesky
                 if (! is_array($blob) || empty($blob['ref']['$link'])) {
                     throw new ProviderFailure('Bluesky did not confirm the image upload.', 'retry');
                 }
-                $images[] = ['alt' => '', 'image' => $blob];
+                $images[] = ['alt' => $descriptions[$image->id] ?? '', 'image' => $blob];
             }
             $record['embed'] = ['$type' => 'app.bsky.embed.images', 'images' => $images];
         }
