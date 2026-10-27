@@ -10,7 +10,9 @@ use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 
 class SocialProviders
 {
@@ -52,9 +54,15 @@ class SocialProviders
             return ['avatar_url' => null, 'verified' => false];
         }
 
-        return Cache::remember('account-profile:v2:'.$account->id.':'.$account->updated_at?->getTimestamp(), now()->addHour(), function () use ($account): array {
+        try {
+            $xClient = $account->provider === 'x' ? $this->client($account) : null;
+        } catch (ProviderFailure) {
+            return ['avatar_url' => null, 'verified' => false];
+        }
+
+        return Cache::remember('account-profile:v2:'.$account->id.':'.$account->updated_at?->getTimestamp(), now()->addHour(), function () use ($account, $xClient): array {
             try {
-                $client = ($account->provider === 'bluesky' ? Http::acceptJson() : $this->client($account))->connectTimeout(2)->timeout(3)->withoutRedirecting();
+                $client = ($xClient ?? ($account->provider === 'bluesky' ? Http::acceptJson() : $this->client($account)))->connectTimeout(2)->timeout(3)->withoutRedirecting();
                 [$endpoint, $query, $field] = match ($account->provider) {
                     'bluesky' => ['https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile', ['actor' => $account->provider_id], 'avatar'],
                     'threads' => ['https://graph.threads.net/v1.0/me', ['fields' => 'threads_profile_picture_url,is_verified'], 'threads_profile_picture_url'],
@@ -63,6 +71,9 @@ class SocialProviders
                     'x' => ['https://api.x.com/2/users/me', ['user.fields' => 'profile_image_url,verified,verified_type'], 'data.profile_image_url'],
                 };
                 $response = $client->get($endpoint, $query);
+                if ($account->provider === 'x' && $response->status() === 401) {
+                    $account->update(['status' => 'expired']);
+                }
                 $url = $response->successful() ? $response->json($field) : null;
                 $verified = $response->successful() && match ($account->provider) {
                     'x' => $response->json('data.verified') === true || in_array($response->json('data.verified_type'), ['blue', 'business', 'government'], true),
@@ -79,17 +90,15 @@ class SocialProviders
         });
     }
 
-    public function client(Account $a)
+    public function client(Account $a): PendingRequest
     {
-        $credentials = $a->credentials;
+        $credentials = $a->provider === 'x' ? $this->xCredentials($a) : $a->credentials;
         if (! $credentials || $a->status !== 'connected') {
             throw new ProviderFailure('Reconnect this account before publishing.');
         }
-        if (! empty($credentials['expires_at']) && CarbonImmutable::parse($credentials['expires_at'])->subDay()->isPast()) {
+        if ($a->provider !== 'x' && ! empty($credentials['expires_at']) && CarbonImmutable::parse($credentials['expires_at'])->subDay()->isPast()) {
             $response = null;
-            if ($a->provider === 'x' && ! empty($credentials['refresh_token'])) {
-                $response = Http::asForm()->withBasicAuth(config('sendae.providers.x.client_id'), config('sendae.providers.x.client_secret'))->timeout(30)->post('https://api.x.com/2/oauth2/token', ['grant_type' => 'refresh_token', 'refresh_token' => $credentials['refresh_token'], 'client_id' => config('sendae.providers.x.client_id')]);
-            } elseif ($a->provider === 'threads' && CarbonImmutable::parse($credentials['expires_at'])->isFuture()) {
+            if ($a->provider === 'threads' && CarbonImmutable::parse($credentials['expires_at'])->isFuture()) {
                 $response = Http::timeout(30)->get('https://graph.threads.net/refresh_access_token', ['grant_type' => 'th_refresh_token', 'access_token' => $credentials['access_token']]);
             }
             if ($response && $response->successful() && $response->json('access_token')) {
@@ -109,6 +118,55 @@ class SocialProviders
         return $client;
     }
 
+    /** @return array<string, mixed> */
+    private function xCredentials(Account $account): array
+    {
+        try {
+            return Cache::lock('x-session:'.$account->id, 45)->block(5, function () use ($account): array {
+                $account->refresh();
+                $credentials = $account->credentials;
+                if (! $credentials || $account->status !== 'connected') {
+                    throw new ProviderFailure('Reconnect your X account before publishing.');
+                }
+                $expiresAt = empty($credentials['expires_at']) ? null : CarbonImmutable::parse($credentials['expires_at']);
+                if (! $expiresAt || $expiresAt->subMinutes(5)->isFuture()) {
+                    return $credentials;
+                }
+                if (empty($credentials['refresh_token'])) {
+                    if ($expiresAt->isPast()) {
+                        $account->update(['status' => 'expired']);
+                        throw new ProviderFailure('X authorization expired. Reconnect it in Accounts.');
+                    }
+
+                    return $credentials;
+                }
+                $response = Http::asForm()->withBasicAuth(config('sendae.providers.x.client_id'), config('sendae.providers.x.client_secret'))
+                    ->connectTimeout(10)->timeout(30)->post('https://api.x.com/2/oauth2/token', [
+                        'grant_type' => 'refresh_token', 'refresh_token' => $credentials['refresh_token'], 'client_id' => config('sendae.providers.x.client_id'),
+                    ]);
+                if ($response->status() === 400 && $response->json('error') === 'invalid_grant') {
+                    $account->update(['status' => 'expired']);
+                    throw new ProviderFailure('X authorization expired. Reconnect it in Accounts.');
+                }
+                $token = $response->json('access_token');
+                $lifetime = $response->json('expires_in');
+                if (! $response->successful() || ! is_string($token) || $token === '' || ! is_numeric($lifetime) || $lifetime <= 0) {
+                    throw new ProviderFailure('X could not refresh authorization. Try again later.', 'retry');
+                }
+                $credentials['access_token'] = $token;
+                if (is_string($response->json('refresh_token')) && $response->json('refresh_token') !== '') {
+                    $credentials['refresh_token'] = $response->json('refresh_token');
+                }
+                $credentials['expires_at'] = now()->addSeconds((int) $lifetime)->toIso8601String();
+                $account->update(['credentials' => $credentials]);
+
+                return $credentials;
+            });
+        } catch (ConnectionException|LockTimeoutException) {
+            throw new ProviderFailure('X could not refresh authorization. Try again later.', 'retry');
+        }
+    }
+
     public function send(Account $a, string $method, string $url, ?array $data = [], bool $publishes = false)
     {
         try {
@@ -119,6 +177,9 @@ class SocialProviders
         }
         if (! $response->successful()) {
             $code = $response->status();
+            if ($a->provider === 'x' && $code === 401) {
+                $a->update(['status' => 'expired']);
+            }
             $outcome = $code === 429 ? 'retry' : ($code >= 500 ? ($publishes ? 'uncertain' : 'retry') : 'failed');
             $message = "Provider returned HTTP $code. ".($outcome === 'uncertain' ? 'Verify the post before retrying.' : ($code === 401 || $code === 403 ? 'Check account permissions or reconnect.' : 'Review the post and provider limits.'));
             if ($a->provider === 'x') {
