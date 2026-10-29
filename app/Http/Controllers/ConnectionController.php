@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Models\Account;
 use App\Services\Bluesky;
+use App\Services\DevNull;
 use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -12,12 +13,20 @@ use App\Services\WorkspaceOwner;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 
 class ConnectionController extends Controller
 {
     public function ticket(Request $r)
     {
         $provider = $r->validate(['provider' => ['required', 'string', Rule::in(array_keys(config('sendae.providers')))]])['provider'];
+        if ($provider === 'devnull') {
+            $data = $r->validate(['redirect_uri' => ['required', 'string', 'regex:~^http://127\.0\.0\.1:([1-9][0-9]{0,4})/devnull/callback$~']]);
+            $port = parse_url($data['redirect_uri'], PHP_URL_PORT);
+            abort_unless(is_int($port) && $port <= 65535, 422, 'Invalid callback port.');
+
+            return app(DevNull::class)->start($data['redirect_uri']);
+        }
         $this->provider($provider);
         $ticket = Str::random(64);
         Cache::put('social_connect:'.$ticket, [
@@ -35,6 +44,13 @@ class ConnectionController extends Controller
         $bluesky->connect($data['identifier'], $data['password'], $data['timezone']);
 
         return ['connected' => true, 'workspace_id' => app(WorkspaceOwner::class)->workspaceId()];
+    }
+
+    public function devnull(Request $request, DevNull $devnull): array
+    {
+        $data = $request->validate(['ticket' => 'required|string|regex:/^[A-Za-z0-9]{64}$/', 'code' => 'required|string|max:255']);
+
+        return $devnull->finish($data['ticket'], $data['code']);
     }
 
     public function claim(Request $r, string $ticket)
@@ -180,6 +196,9 @@ class ConnectionController extends Controller
             app(WorkspaceOwner::class)->run($request->user()->id, function () use ($selection, $data): void {
                 foreach ($data['accounts'] as $index) {
                     $account = $selection['accounts'][$index];
+                    if ($selection['provider'] === 'devnull') {
+                        $account['credentials'] = json_decode(Crypt::decryptString($account['credentials']), true, flags: JSON_THROW_ON_ERROR);
+                    }
                     $connectedAccount = Account::updateOrCreate(['provider' => $selection['provider'], 'provider_id' => $account['provider_id']], ['name' => $account['name'], 'credentials' => $account['credentials'], 'status' => 'connected', 'timezone' => $data['timezone']]);
                     if (isset($account['profile'])) {
                         Cache::put('account-profile:v2:'.$connectedAccount->id.':'.$connectedAccount->updated_at?->getTimestamp(), $account['profile'], now()->addHour());

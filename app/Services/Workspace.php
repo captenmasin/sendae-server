@@ -42,7 +42,7 @@ class Workspace
         $publications = Publication::orderByDesc('scheduled_at')->get();
         foreach ($publications as $publication) {
             $account = $accounts->firstWhere('id', $publication->account_id);
-            if ($account?->provider === 'threads' && $publication->receipts) {
+            if (in_array($account?->provider, ['threads', 'devnull']) && $publication->receipts) {
                 $urls = [];
                 // ponytail: fetch cache misses per receipt; batch lookups if history makes sync slow.
                 foreach ($publication->receipts as $id) {
@@ -179,7 +179,8 @@ class Workspace
                 $items[0]['media_alt'] = $descriptions;
             }
         }
-        $limit = ['bluesky' => 300, 'x' => 280, 'threads' => 500, 'facebook' => 63206, 'linkedin' => 3000, 'linkedin_page' => 3000][$account->provider];
+        // shortcut: count /dev/null URLs literally; adopt its URL weighting when longer linked posts are needed.
+        $limit = ['bluesky' => 300, 'x' => 280, 'threads' => 500, 'facebook' => 63206, 'linkedin' => 3000, 'linkedin_page' => 3000, 'devnull' => 4000][$account->provider];
         foreach ($items as $i => $item) {
             if (! trim($item['text']) && ! $item['media_ids']) {
                 $this->invalid('content', "{$account->name}: post ".($i + 1).' is empty.');
@@ -212,8 +213,11 @@ class Workspace
                     $this->invalid('media', 'Bluesky supports JPEG, PNG or WebP images up to 2 MB each. Video publishing is not supported yet.');
                 }
             }
+            if ($account->provider === 'devnull' && $media->contains(fn (Media $attachment): bool => ! in_array($attachment->mime, ['image/jpeg', 'image/png', 'image/webp']) || $attachment->size > 10 * 1024 * 1024)) {
+                $this->invalid('media', '/dev/null supports JPEG, PNG or WebP images up to 10 MB. Video publishing is not supported.');
+            }
             $video = $media->contains(fn ($m) => str_starts_with($m->mime, 'video/'));
-            $max = ['bluesky' => 4, 'x' => 4, 'threads' => 20, 'facebook' => 10, 'linkedin' => 20, 'linkedin_page' => 20][$account->provider];
+            $max = ['bluesky' => 4, 'x' => 4, 'threads' => 20, 'facebook' => 10, 'linkedin' => 20, 'linkedin_page' => 20, 'devnull' => 3][$account->provider];
             if ($media->count() > $max || ($video && $media->count() > 1)) {
                 $this->invalid('media', "{$account->name}: use up to $max images".($account->provider === 'bluesky' ? ' per post.' : ' or one video per post.'));
             }

@@ -47,5 +47,6 @@ Route::middleware(['auth:api', LocalOrOwner::class, CheckToken::using('mcp:use')
     }
     Route::post('/schedulePreview', [W::class, 'schedulePreview']);
     Route::post('/connectBluesky', [ConnectionController::class, 'bluesky'])->middleware('throttle:connect');
+    Route::post('/connectDevNull', [ConnectionController::class, 'devnull'])->middleware('throttle:connect');
     Route::post('/connect', [ConnectionController::class, 'ticket'])->middleware('throttle:connect');
 });

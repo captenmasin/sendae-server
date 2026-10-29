@@ -6,6 +6,7 @@ use App\Models\Media;
 use App\Models\Account;
 use App\Models\Publication;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Cache;
@@ -18,6 +19,9 @@ class SocialProviders
 {
     public function postUrl(Account $account, string $id): ?string
     {
+        if ($account->provider === 'devnull' && Str::isUuid($id)) {
+            return 'https://dev-null.sh/@'.rawurlencode($account->credentials['handle'] ?? ltrim($account->name, '@')).'/commits/'.$id;
+        }
         if ($account->provider !== 'threads') {
             return null;
         }
@@ -50,6 +54,9 @@ class SocialProviders
      */
     public function profile(Account $account): array
     {
+        if ($account->provider === 'devnull') {
+            return ['avatar_url' => $account->credentials['avatar_url'] ?? null, 'verified' => false];
+        }
         if ($account->status !== 'connected' || ! in_array($account->provider, ['threads', 'facebook', 'linkedin', 'x', 'bluesky'])) {
             return ['avatar_url' => null, 'verified' => false];
         }
@@ -223,6 +230,7 @@ class SocialProviders
         }
 
         return match ($a->provider) {
+            'devnull' => app(DevNull::class)->publish($a, $item['text'], $media, $reply, $item['media_alt'] ?? []),
             'bluesky' => app(Bluesky::class)->publish($a, $item['text'], $media, $reply, $item['media_alt'] ?? []),
             'x' => $this->x($a, $item['text'], $media, $reply, $item['media_alt'] ?? []),
             'threads' => $this->threads($a, $item['text'], $media, $reply, $item['media_alt'] ?? []),
@@ -430,6 +438,9 @@ class SocialProviders
         }
         $host = strtolower($url['host'] ?? '');
         $path = rawurldecode($url['path'] ?? '');
+        if ($account->provider === 'devnull' && $host === 'dev-null.sh' && preg_match('~^/@[^/]+/commits/([0-9a-f-]{36})/?$~i', $path, $match) && Str::isUuid($match[1])) {
+            return $match[1];
+        }
         if ($account->provider === 'x' && in_array($host, ['x.com', 'www.x.com', 'twitter.com', 'www.twitter.com']) && preg_match('~^/(?:[^/]+|i/web)/status/(\d+)/?$~', $path, $match)) {
             return $match[1];
         }
@@ -492,7 +503,11 @@ class SocialProviders
         if (! $a || $expected === null) {
             throw new ProviderFailure('No unfinished thread item to verify.');
         }
-        if ($a->provider === 'bluesky') {
+        if ($a->provider === 'devnull') {
+            $d = app(DevNull::class)->record($a, $id);
+            $owner = $d['author']['id'] ?? null;
+            $text = $d['body'] ?? null;
+        } elseif ($a->provider === 'bluesky') {
             $d = app(Bluesky::class)->record($a, $id);
             $owner = $a->provider_id;
             $text = $d['value']['text'] ?? null;
@@ -520,6 +535,11 @@ class SocialProviders
 
     public function metrics(Account $a, string $id): array
     {
+        if ($a->provider === 'devnull') {
+            $data = app(DevNull::class)->record($a, $id);
+
+            return ['likes' => $data['stars_count'] ?? null, 'replies' => $data['replies_count'] ?? null];
+        }
         if ($a->provider === 'bluesky') {
             return app(Bluesky::class)->metrics($a, $id);
         }

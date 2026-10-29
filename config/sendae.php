@@ -12,6 +12,7 @@ return [
     'providers' => [
         'x' => ['label' => 'X', 'client_id' => env('X_CLIENT_ID'), 'client_secret' => env('X_CLIENT_SECRET')],
         'bluesky' => ['label' => 'Bluesky', 'configured' => true],
+        'devnull' => ['label' => '/dev/null', 'configured' => true],
         'threads' => ['label' => 'Threads', 'client_id' => env('THREADS_CLIENT_ID'), 'client_secret' => env('THREADS_CLIENT_SECRET')],
         'facebook' => ['label' => 'Facebook Page', 'client_id' => env('FACEBOOK_CLIENT_ID'), 'client_secret' => env('FACEBOOK_CLIENT_SECRET')],
         'linkedin' => ['label' => 'LinkedIn profile', 'client_id' => env('LINKEDIN_CLIENT_ID'), 'client_secret' => env('LINKEDIN_CLIENT_SECRET')],
