@@ -54,6 +54,9 @@ class SocialProviders
      */
     public function profile(Account $account): array
     {
+        if (str_starts_with($account->provider_id, 'buffer:')) {
+            return ['avatar_url' => $account->credentials['avatar_url'] ?? null, 'verified' => false];
+        }
         if ($account->provider === 'devnull') {
             return ['avatar_url' => $account->credentials['avatar_url'] ?? null, 'verified' => false];
         }
@@ -99,6 +102,9 @@ class SocialProviders
 
     public function client(Account $a): PendingRequest
     {
+        if (str_starts_with($a->provider_id, 'buffer:')) {
+            throw new ProviderFailure('This LinkedIn Page is connected through Buffer.');
+        }
         $credentials = $a->provider === 'x' ? $this->xCredentials($a) : $a->credentials;
         if (! $credentials || $a->status !== 'connected') {
             throw new ProviderFailure('Reconnect this account before publishing.');
@@ -425,6 +431,13 @@ class SocialProviders
     public function recoveryId(Publication $publication, string $input): string
     {
         $input = trim($input);
+        if (str_starts_with($publication->account?->provider_id ?? '', 'buffer:')) {
+            if (! preg_match('/^(?:buffer:)?([A-Za-z0-9_-]+)$/', $input, $match)) {
+                throw new ProviderFailure('Enter the Buffer post ID for this publication.');
+            }
+
+            return 'buffer:'.$match[1];
+        }
         if (preg_match('~<iframe\b[^>]*\bsrc\s*=\s*(["\'])(.*?)\1~is', $input, $embed)) {
             $input = html_entity_decode($embed[2], ENT_QUOTES | ENT_HTML5);
         }
@@ -499,6 +512,11 @@ class SocialProviders
     public function verify(Publication $p, string $id): void
     {
         $a = $p->account;
+        if (str_starts_with($a?->provider_id ?? '', 'buffer:')) {
+            app(Buffer::class)->verify($p, $id);
+
+            return;
+        }
         $expected = $p->snapshot['items'][count($p->receipts ?? [])]['text'] ?? null;
         if (! $a || $expected === null) {
             throw new ProviderFailure('No unfinished thread item to verify.');
@@ -535,6 +553,9 @@ class SocialProviders
 
     public function metrics(Account $a, string $id): array
     {
+        if (str_starts_with($id, 'buffer:')) {
+            return ['impressions' => null, 'likes' => null, 'comments' => null, 'shares' => null];
+        }
         if ($a->provider === 'devnull') {
             $data = app(DevNull::class)->record($a, $id);
 

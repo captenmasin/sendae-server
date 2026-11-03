@@ -21,6 +21,9 @@ class Workspace
     {
         $data = Validator::make($data, ['id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('user_id', app(WorkspaceOwner::class)->requireId())->where('workspace_id', app(WorkspaceOwner::class)->workspaceId())]])->validate();
         $account = Account::findOrFail($data['id']);
+        if (str_starts_with($account->provider_id, 'buffer:') && Publication::where('account_id', $account->id)->whereIn('status', ['publishing', 'uncertain'])->exists()) {
+            $this->invalid('account', 'Wait for Buffer publishing to finish and resolve uncertain posts before disconnecting this Page.');
+        }
         $account->update(['status' => 'disconnected', 'credentials' => null]);
         Publication::where('account_id', $account->id)->whereIn('status', ['scheduled', 'retry'])->update(['status' => 'cancelled', 'error' => 'Account disconnected.']);
 
@@ -58,7 +61,7 @@ class Workspace
             return $account->toArray() + $profile;
         }),
             'media' => Media::latest()->get(), 'publications' => $publications,
-            'settings' => ['storage' => app(Attachments::class)->usage(), 'has_password' => User::findOrFail(app(WorkspaceOwner::class)->requireId())->has_password, 'workspace_id' => app(WorkspaceOwner::class)->workspaceId(), 'workspaces' => \App\Models\Workspace::where('user_id', app(WorkspaceOwner::class)->requireId())->orderBy('created_at')->get(), 'mode' => config('sendae.mode'), 'mcp_url' => url('/mcp'), 'connections_url' => url('/'), 'paired' => false, 'providers' => collect(config('sendae.providers'))->map(fn ($p) => ['label' => $p['label'], 'configured' => $p['configured'] ?? (bool) ($p['client_id'] ?? null), 'approved' => $p['approved'] ?? true])]];
+            'settings' => ['storage' => app(Attachments::class)->usage(), 'has_password' => User::findOrFail(app(WorkspaceOwner::class)->requireId())->has_password, 'workspace_id' => app(WorkspaceOwner::class)->workspaceId(), 'workspaces' => \App\Models\Workspace::where('user_id', app(WorkspaceOwner::class)->requireId())->orderBy('created_at')->get(), 'mode' => config('sendae.mode'), 'mcp_url' => url('/mcp'), 'connections_url' => url('/'), 'paired' => false, 'providers' => collect(config('sendae.providers'))->map(fn ($p) => ['label' => $p['label'], 'configured' => ($p['connection'] ?? null) === 'buffer' || ($p['configured'] ?? (bool) ($p['client_id'] ?? null)), 'approved' => ($p['connection'] ?? null) === 'buffer' || ($p['approved'] ?? true), 'connection' => $p['connection'] ?? 'oauth'])]];
     }
 
     private function draftsForEditing(Collection $publications, Collection $accounts): Collection
@@ -202,6 +205,12 @@ class Workspace
                 }
             }
             $mediaHost = strtolower(parse_url(config('app.url'), PHP_URL_HOST) ?? '');
+            if (str_starts_with($account->provider_id, 'buffer:') && ($media->contains(fn (Media $attachment): bool => str_starts_with($attachment->mime, 'image/') && $attachment->size > 10 * 1024 * 1024) || ($media->contains('mime', 'image/gif') && $media->count() > 1))) {
+                $this->invalid('media', 'Buffer supports LinkedIn images up to 10 MB, or one GIF up to 10 MB without other attachments.');
+            }
+            if ($media->isNotEmpty() && str_starts_with($account->provider_id, 'buffer:') && (parse_url(config('app.url'), PHP_URL_SCHEME) !== 'https' || $mediaHost === 'localhost' || str_ends_with($mediaHost, '.test') || str_ends_with($mediaHost, '.localhost') || (filter_var($mediaHost, FILTER_VALIDATE_IP) && ! filter_var($mediaHost, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)))) {
+                $this->invalid('media', 'Buffer needs a public HTTPS publishing server to download images and videos.');
+            }
             if ($media->isNotEmpty() && in_array($account->provider, ['threads', 'facebook']) && ($mediaHost === 'localhost' || str_ends_with($mediaHost, '.test') || str_ends_with($mediaHost, '.localhost'))) {
                 $this->invalid('media', 'Facebook and Threads cannot download attachments from this local server. The publishing backend needs a public HTTPS address before image or video posts can be sent.');
             }
@@ -435,6 +444,15 @@ class Workspace
                 $allowed = $data['action'] === 'not_published' ? ['uncertain'] : ['scheduled', 'retry', 'failed', 'missed', 'cancelled'];
                 if (! in_array($p->status, $allowed)) {
                     $this->invalid('status', 'This publication cannot be rescheduled in its current state.');
+                }
+                if (! empty($p->snapshot['buffer_post_id'])) {
+                    $post = app(Buffer::class)->post($p->account, $p->snapshot['buffer_post_id']);
+                    if (($post['status'] ?? null) !== 'error') {
+                        $this->invalid('status', 'Buffer may still publish this post. Confirm its delivery or resolve it in Buffer before rescheduling.');
+                    }
+                    $snapshot = $p->snapshot;
+                    unset($snapshot['buffer_post_id']);
+                    $p->snapshot = $snapshot;
                 }
                 if ($data['action'] === 'reschedule') {
                     $this->separatePublication($p);

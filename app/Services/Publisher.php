@@ -17,8 +17,8 @@ class Publisher
         if (config('sendae.mode') !== 'server') {
             return;
         }
-        Publication::withoutGlobalScope('owner')->where('status', 'publishing')->where('updated_at', '<', now()->subMinutes(15))->update(['status' => 'uncertain', 'error' => 'Worker stopped before confirming the outcome. Verify on the provider before recovering.']);
-        foreach (Publication::withoutGlobalScope('owner')->whereIn('status', ['scheduled', 'retry'])->where('scheduled_at', '<=', now())->select('account_id')->distinct()->pluck('account_id') as $accountId) {
+        Publication::withoutGlobalScope('owner')->where('status', 'publishing')->whereNull('snapshot->buffer_post_id')->where('updated_at', '<', now()->subMinutes(15))->update(['status' => 'uncertain', 'error' => 'Worker stopped before confirming the outcome. Verify on the provider before recovering.']);
+        foreach (Publication::withoutGlobalScope('owner')->where(fn ($query) => $query->whereIn('status', ['scheduled', 'retry'])->orWhere(fn ($query) => $query->where('status', 'publishing')->whereNotNull('snapshot->buffer_post_id')))->where('scheduled_at', '<=', now())->select('account_id')->distinct()->pluck('account_id') as $accountId) {
             PublishAccount::dispatch($accountId);
         }
     }
@@ -42,7 +42,7 @@ class Publisher
             return;
         }
         try {
-            foreach (Publication::where('account_id', $accountId)->whereIn('status', ['scheduled', 'retry'])->where('scheduled_at', '<=', now())->orderBy('scheduled_at')->get() as $p) {
+            foreach (Publication::where('account_id', $accountId)->where(fn ($query) => $query->whereIn('status', ['scheduled', 'retry'])->orWhere(fn ($query) => $query->where('status', 'publishing')->whereNotNull('snapshot->buffer_post_id')))->where('scheduled_at', '<=', now())->orderBy('scheduled_at')->get() as $p) {
                 $this->publish($p->id);
             }
         } finally {
@@ -54,11 +54,12 @@ class Publisher
     {
         $p = DB::transaction(function () use ($id) {
             $p = Publication::lockForUpdate()->findOrFail($id);
-            if (! in_array($p->status, ['scheduled', 'retry']) || $p->scheduled_at->isFuture()) {
+            $bufferPending = $p->status === 'publishing' && ! empty($p->snapshot['buffer_post_id']);
+            if ((! in_array($p->status, ['scheduled', 'retry']) && ! $bufferPending) || $p->scheduled_at->isFuture()) {
                 return null;
             }
             if ($p->scheduled_at->addHours(24)->isPast()) {
-                $p->update(['status' => 'missed', 'error' => 'The original scheduled time is more than 24 hours ago. Reschedule manually.']);
+                $p->update(['status' => $bufferPending ? 'uncertain' : 'missed', 'error' => $bufferPending ? 'Buffer has not confirmed delivery after 24 hours. Review the post in Buffer before recovering.' : 'The original scheduled time is more than 24 hours ago. Reschedule manually.']);
 
                 return null;
             }
@@ -79,6 +80,17 @@ class Publisher
             if (! $p->account) {
                 throw new ProviderFailure('The destination account no longer exists.');
             }
+            if (str_starts_with($p->account->provider_id, 'buffer:')) {
+                $receipt = app(Buffer::class)->publish($p);
+                if ($receipt === null) {
+                    $p->update(['next_attempt_at' => now()->addMinutes(2)]);
+
+                    return;
+                }
+                $p->update(['receipts' => [$receipt], 'status' => 'published', 'published_at' => now(), 'next_attempt_at' => null]);
+
+                return;
+            }
             $receipts = $p->receipts ?? [];
             foreach (array_slice($p->snapshot['items'], count($receipts)) as $item) {
                 $id = $this->providers->publish($p->account, $item, $receipts ? end($receipts) : null);
@@ -87,7 +99,8 @@ class Publisher
             }
             $p->update(['status' => 'published', 'published_at' => now(), 'next_attempt_at' => null]);
         } catch (ProviderFailure $e) {
-            $p->update(['status' => $e->outcome, 'error' => $e->getMessage(), 'next_attempt_at' => $e->outcome === 'retry' ? now()->addSeconds($e->retryAfter) : null]);
+            $outcome = ! empty($p->snapshot['buffer_post_id']) ? ($e->outcome === 'retry' ? 'publishing' : 'uncertain') : $e->outcome;
+            $p->update(['status' => $outcome, 'error' => $e->getMessage(), 'next_attempt_at' => in_array($outcome, ['retry', 'publishing']) ? now()->addSeconds($e->retryAfter) : null]);
         } catch (\Throwable $e) {
             $p->update(['status' => 'uncertain', 'error' => 'Publishing stopped without a confirmed outcome. Review this publication before retrying.']);
             report($e);

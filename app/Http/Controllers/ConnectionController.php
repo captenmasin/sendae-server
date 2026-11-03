@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use App\Models\Account;
+use App\Services\Buffer;
 use App\Services\Bluesky;
 use App\Services\DevNull;
 use Illuminate\Support\Str;
@@ -44,6 +45,13 @@ class ConnectionController extends Controller
         $bluesky->connect($data['identifier'], $data['password'], $data['timezone']);
 
         return ['connected' => true, 'workspace_id' => app(WorkspaceOwner::class)->workspaceId()];
+    }
+
+    public function buffer(Request $request, Buffer $buffer): array
+    {
+        $data = $request->validate(['api_key' => 'required|string|max:4096']);
+
+        return $buffer->connect($data['api_key']);
     }
 
     public function devnull(Request $request, DevNull $devnull): array
@@ -196,7 +204,7 @@ class ConnectionController extends Controller
             app(WorkspaceOwner::class)->run($request->user()->id, function () use ($selection, $data): void {
                 foreach ($data['accounts'] as $index) {
                     $account = $selection['accounts'][$index];
-                    if ($selection['provider'] === 'devnull') {
+                    if (is_string($account['credentials'])) {
                         $account['credentials'] = json_decode(Crypt::decryptString($account['credentials']), true, flags: JSON_THROW_ON_ERROR);
                     }
                     $connectedAccount = Account::updateOrCreate(['provider' => $selection['provider'], 'provider_id' => $account['provider_id']], ['name' => $account['name'], 'credentials' => $account['credentials'], 'status' => 'connected', 'timezone' => $data['timezone']]);
